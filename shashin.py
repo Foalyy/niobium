@@ -84,6 +84,19 @@ def load_photos():
         if photos_to_insert or photos_to_remove:
             photos_in_db = get_photos_from_db(db)
 
+        # Delete old thumbnails
+        thumbnails = [filename for filename in os.listdir(app.config['CACHE_DIR']) if filename.lower().startswith('thumbnail_') and filename.lower().endswith('.jpg')];
+        thumbnails_to_delete = []
+        all_uids = [photo['uid'] for photo in photos_in_db]
+        for thumbnail in thumbnails:
+            uid = thumbnail[len('thumbnail_'): -len('.jpg')]
+            if not uid in all_uids:
+                thumbnails_to_delete.append(thumbnail)
+        if thumbnails_to_delete:
+            print(f"Deleting {len(thumbnails_to_delete)} obsolete thumbnails : {', '.join(thumbnails_to_delete)}")
+            for thumbnail in thumbnails_to_delete:
+                os.remove(app.config['CACHE_DIR'] + thumbnail)
+
     return photos_in_db
 
 
