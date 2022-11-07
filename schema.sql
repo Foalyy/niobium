@@ -1,0 +1,14 @@
+DROP TABLE IF EXISTS photo;
+
+CREATE TABLE photo (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename VARCHAR(255),
+    uid VARCHAR(16),
+    title VARCHAR(255) NOT NULL DEFAULT '',
+    date_taken VARCHAR(16) NOT NULL DEFAULT '',
+    camera_name VARCHAR(255) NOT NULL DEFAULT '',
+    lens_name VARCHAR(255) NOT NULL DEFAULT '',
+    focal_length VARCHAR(16) NOT NULL DEFAULT '',
+    aperture VARCHAR(16) NOT NULL DEFAULT '',
+    speed VARCHAR(16) NOT NULL DEFAULT ''
+);

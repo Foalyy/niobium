@@ -1,5 +1,6 @@
 __pycache__
 venv
+shashin.sqlite
 cache/*
 photos/*
 static/photos
