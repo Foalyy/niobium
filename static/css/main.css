@@ -16,6 +16,10 @@ body {
     font-family: 'Open Sans';
 }
 
+.hidden {
+    display: none !important;
+}
+
 .container {
     width: 100vw;
     min-height: 100vh;
@@ -73,6 +77,7 @@ body {
     cursor: zoom-out;
     opacity: 100%;
     transition: opacity 1s ease;
+    transition: background-color 0.5s ease;
 }
 
 .loupe-photo {
@@ -91,7 +96,7 @@ body {
     object-fit: contain;
 }
 
-.loupe-previous, .loupe-next {
+.loupe-prev, .loupe-next {
     position: absolute;
     top: 0;
     bottom: 0;
@@ -102,7 +107,7 @@ body {
     cursor: pointer;
 }
 
-.loupe-previous {
+.loupe-prev {
     left: 0;
 }
 
@@ -110,7 +115,7 @@ body {
     right: 0;
 }
 
-.loupe-first .loupe-previous {
+.loupe-first .loupe-prev {
     display: none;
 }
 
@@ -128,7 +133,7 @@ body {
     border-radius: 1rem;
 }
 
-.loupe-previous:hover .loupe-button,
+.loupe-prev:hover .loupe-button,
 .loupe-next:hover .loupe-button {
     background-color: #FFFFFF20;
     transition: background-color 0.2s ease;
