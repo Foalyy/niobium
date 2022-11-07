@@ -15,14 +15,14 @@
             <div class="grid">
                 {% for photo in photos %}
                     <div class="grid-item">
-                        <img src="{{ url_for('static', filename='photos/' + photo['filename']) }}" class="photo">
+                        <img class="photo" src="" data-src="{{ url_for('get_photo', uid=photo['uid']) }}" data-thumbnail="{{ url_for('get_thumbnail', uid=photo['uid']) }}">
                         <div class="veil"></div>
                     </div>
                 {% endfor %}
             </div>
             <div class="loupe">
                 <div class="loupe-photo">
-                    <img src="{{ url_for('static', filename='photos/DSC_2717.jpg') }}" class="photo-large">
+                    <img src="" class="photo-large">
                     <div class="loupe-previous"><div class="loupe-button"><i class="fa-solid fa-chevron-left"></i></div></div>
                     <div class="loupe-next"><div class="loupe-button"><i class="fa-solid fa-chevron-right"></i></div></div>
                 </div>

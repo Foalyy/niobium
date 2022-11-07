@@ -1,2 +1,4 @@
 TITLE = "Shashin"
 PHOTOS_DIR = "photos/"
+CACHE_DIR = "cache/"
+THUMBNAIL_MAX_SIZE=800

@@ -1,5 +1,7 @@
-from flask import Flask, render_template, current_app, g
 import os, random, toml, sqlite3
+from flask import Flask, current_app, g, render_template, abort, send_from_directory
+import werkzeug
+from wand.image import Image
 from pprint import pprint
 
 
@@ -88,6 +90,9 @@ def load_photos():
 ### App
 app = Flask(__name__)
 app.config.from_file('config.toml', load=toml.load)
+for dir_name in ['PHOTOS_DIR', 'CACHE_DIR']:
+    if not app.config[dir_name].endswith('/'):
+        app.config[dir_name] += '/'
 app.teardown_appcontext(close_db)
 
 
@@ -96,3 +101,56 @@ app.teardown_appcontext(close_db)
 def gallery():
     photos = load_photos()
     return render_template('main.html', photos=photos)
+
+@app.route("/<uid>")
+def get_photo(uid):
+    # Get the filename associated to this uid
+    with get_db() as db:
+        cur = g.db.cursor()
+        cur.execute("SELECT filename FROM photo WHERE uid=?", (uid,))
+        photo = cur.fetchone()
+    if photo is None:
+        abort(404)
+
+    # Return the photo
+    return send_from_directory(app.config['PHOTOS_DIR'], photo['filename'])
+
+@app.route("/<uid>/thumbnail")
+def get_thumbnail(uid):
+    # Return the thumbnail from the cache folder if it exists
+    thumbnail_filename = 'thumbnail_' + uid + '.jpg'
+    try:
+        return send_from_directory(app.config['CACHE_DIR'], thumbnail_filename)
+
+    except werkzeug.exceptions.NotFound as e:
+        # The thumbnail doesn't exist, try to generate it
+
+        # Get the filename associated to this uid
+        with get_db() as db:
+            cur = g.db.cursor()
+            cur.execute("SELECT filename FROM photo WHERE uid=?", (uid,))
+            row = cur.fetchone()
+        if row is None:
+            abort(404)
+        filename = row['filename']
+
+        # Resize the image and save it to the cache directory
+        photo = Image(filename = app.config['PHOTOS_DIR'] + filename)
+        max_size = app.config['THUMBNAIL_MAX_SIZE']
+        if photo.width > max_size or photo.height > max_size:
+            # Find the best ratio to make the image fit into the max dimension
+            resized_width = max_size
+            resize_ratio = photo.width / max_size
+            resized_height = photo.height / resize_ratio
+            if resized_height > max_size:
+                resize_ratio = photo.height / max_size
+                resized_height = max_size
+                resized_width = photo.width / resize_ratio
+            photo.resize(round(resized_width), round(resized_height))
+        photo.save(filename = app.config['CACHE_DIR'] + thumbnail_filename)
+        print(f"Thumbnail for {filename} generated in the cache directory")
+        return send_from_directory(app.config['CACHE_DIR'], thumbnail_filename)
+
+@app.errorhandler(404)
+def page_not_found(error):
+    return render_template('404.html'), 404
