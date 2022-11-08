@@ -14,7 +14,7 @@
         <div class="container">
             <div class="grid">
                 {% for photo in photos %}
-                    <div class="grid-item" style="background-color: #{{ photo['color'] }}; aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }}" data-uid="{{ photo['uid'] }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}"></div>
+                    <div class="grid-item" style="background-color: #{{ photo['color'] }}; aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }}" data-uid="{{ photo['uid'] }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}" data-loaded="false"></div>
                 {% endfor %}
             </div>
             <div class="loupe">

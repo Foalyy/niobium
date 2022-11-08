@@ -132,7 +132,7 @@ def parse_photo_metadata(photo):
 
         # Compute the photo's average color
         average_color = [image.mean_channel(channel)[0] / image.quantum_range for channel in ['red', 'green', 'blue']]
-        row['color'] = ''.join(['{:02x}'.format(int(channel_value * 255 / 8)) for channel_value in average_color])
+        row['color'] = ''.join(['{:02x}'.format(int(channel_value * 255 / 6)) for channel_value in average_color])
 
         # Parse EXIF metadata
         if app.config['READ_EXIF']:

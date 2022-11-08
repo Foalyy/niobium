@@ -54,26 +54,38 @@ function setLoupeImage(element) {
 }
 
 $(function() {
-    $('.grid-item').each(function() {
-        var grid_item = $(this);
-        var request = new XMLHttpRequest();
-        request.onreadystatechange = function() {
-            if (this.status == 200) {
-                if (this.readyState == 4) {
-                    grid_item.html(request.responseText);
-                    var image = grid_item.children('.photo');
-                    $(image).on('load', function() {
-                        $(image).removeClass('transparent');
-                        $(image).on('click', function(event) {
-                            openLoupe(this);
-                        });
-                    });
-                    $(image).attr('src', $(image).data('src-thumbnail'));
+    var observer = new IntersectionObserver(function(elements) {
+        $(elements).each(function() {
+            if (this.isIntersecting) {
+                var grid_item = $(this.target);
+                if (!grid_item.data('loaded')) {
+                    var request = new XMLHttpRequest();
+                    request.onreadystatechange = function() {
+                        if (this.status == 200) {
+                            if (this.readyState == 4) {
+                                grid_item.html(request.responseText);
+                                var image = grid_item.children('.photo');
+                                $(image).on('load', function() {
+                                    $(image).removeClass('transparent');
+                                    $(image).on('click', function(event) {
+                                        openLoupe(this);
+                                    });
+                                });
+                                $(image).attr('src', $(image).data('src-thumbnail'));
+                                grid_item.data('loaded', true);
+                            }
+                        }
+                    };
+                    request.open('GET', grid_item.data('load-url'), true);
+                    request.send();
                 }
             }
-        };
-        request.open('GET', grid_item.data('load-url'), true);
-        request.send();
+        });
+    }, {
+        threshold: 0
+    });
+    $('.grid-item').each(function() {
+        observer.observe(this);
     });
 
     $('.loupe-photo').on('click', function(event) {
