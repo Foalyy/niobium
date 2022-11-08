@@ -1,16 +1,41 @@
-var savedScroll = 0;
-var loupeElement = undefined;
+let savedScroll = 0;
+let loupeElement = undefined;
 
-function openLoupe(gridElement) {
+function openLoupe(gridItem) {
     savedScroll = window.pageYOffset;
-    setLoupeImage(gridElement);
+    setLoupePhoto(gridItem);
     $('.container').addClass('show-loupe');
     window.scrollTo(0, 0);
+}
+
+function setLoupePhoto(gridItem) {
+    loadPhoto(gridItem, function(gridItem) {
+        loupeElement = gridItem.children('.photo');
+        let photo = $('.loupe .photo-large');
+        photo.addClass('transparent');
+        photo.attr('src', '');
+        photo.one('load', function() {
+            photo.removeClass('transparent');
+        });
+        photo.attr('src', $(loupeElement).data('src-full'));
+        $('.loupe').css('background-color', $(loupeElement).data('color') + 'FC');
+        if ($(loupeElement).parent().prev().length > 0) {
+            $('.loupe-prev').removeClass('hidden');
+        } else {
+            $('.loupe-prev').addClass('hidden');
+        }
+        if ($(loupeElement).parent().next().length > 0) {
+            $('.loupe-next').removeClass('hidden');
+        } else {
+            $('.loupe-next').addClass('hidden');
+        }
+    });
 }
 
 function closeLoupe() {
     $('.container').removeClass('show-loupe');
     window.scrollTo(0, savedScroll);
+    scrollToPhoto($('.grid-item.selected'));
 }
 
 function isLoupeOpen() {
@@ -20,65 +45,199 @@ function isLoupeOpen() {
 function loupePrev() {
     let prev = $(loupeElement).parent().prev();
     if (prev.length > 0) {
-        setLoupeImage(prev.children('.photo'));
+        setLoupePhoto(prev);
+        selectPhoto(prev);
     }
 }
 
 function loupeNext() {
     let next = $(loupeElement).parent().next();
     if (next.length > 0) {
-        setLoupeImage(next.children('.photo'));
+        setLoupePhoto(next);
+        selectPhoto(next);
     }
 }
 
-function setLoupeImage(element) {
-    loupeElement = element;
-    var photo = $('.loupe .photo-large');
-    photo.addClass('transparent');
-    photo.attr('src', '');
-    photo.one('load', function() {
-        photo.removeClass('transparent');
-    });
-    photo.attr('src', $(loupeElement).data('src-full'));
-    $('.loupe').css('background-color', '#' + $(loupeElement).data('color') + 'FC');
-    if ($(loupeElement).parent().prev().length > 0) {
-        $('.loupe-prev').removeClass('hidden');
-    } else {
-        $('.loupe-prev').addClass('hidden');
+function loupeFirst() {
+    let first = $(loupeElement).parents('.grid').children().first();
+    setLoupePhoto(first);
+    selectPhoto(first);
+}
+
+function loupeLast() {
+    let last = $(loupeElement).parents('.grid').children().last();
+    setLoupePhoto(last);
+    selectPhoto(last);
+}
+
+function scrollToPhoto(element) {
+    const margin = 30;
+    let viewportTop = window.scrollY;
+    let viewportBottom = viewportTop + $(window).height();
+    let elementTop = $(element).offset().top;
+    let elementBottom = elementTop + $(element).outerHeight();
+    if (elementTop - margin < viewportTop) {
+        window.scrollBy(0, elementTop - margin - viewportTop);
+    } else if (elementBottom + margin > viewportBottom) {
+        window.scrollBy(0, elementBottom + margin - viewportBottom);
     }
-    if ($(loupeElement).parent().next().length > 0) {
-        $('.loupe-next').removeClass('hidden');
+}
+
+function selectPhoto(gridItem) {
+    $('.grid-item.selected').removeClass('selected');
+    $(gridItem).addClass('selected');
+}
+
+function selectPrev() {
+    let selected = $('.grid-item.selected');
+    if (selected.length == 0) {
+        $('.grid-item').last().addClass('selected');
     } else {
-        $('.loupe-next').addClass('hidden');
+        let prev = selected.prev();
+        if (prev.length > 0) {
+            selected.removeClass('selected');
+            prev.addClass('selected');
+            scrollToPhoto(prev);
+        }
+    }
+}
+
+function selectNext() {
+    let selected = $('.grid-item.selected');
+    if (selected.length == 0) {
+        $('.grid-item').first().addClass('selected');
+    } else {
+        let next = selected.next();
+        if (next.length > 0) {
+            selected.removeClass('selected');
+            next.addClass('selected');
+            scrollToPhoto(next);
+        }
+    }
+}
+
+function selectBelow() {
+    let selected = $('.grid-item.selected');
+    if (selected.length == 0) {
+        $('.grid-item').first().addClass('selected');
+    } else {
+        selectRow(false);
+    }
+}
+
+function selectAbove() {
+    let selected = $('.grid-item.selected');
+    if (selected.length == 0) {
+        $('.grid-item').first().addClass('selected');
+    } else {
+        selectRow(true);
+    }
+}
+
+function selectRow(above) {
+    let selected = $('.grid-item.selected');
+    let selectedY = selected.offset().top;
+    let nextRowY = -1;
+    let nextRow = [];
+    let firstIndex = $('.grid-item').first().data('index');
+    let lastIndex = $('.grid-item').last().data('index');
+    for (index = selected.data('index') + (above ? -1 : 1); above && index >= firstIndex || !above && index <= lastIndex; (above ? index-- : index++)) {
+        let element = $('[data-index="' + index + '"]');
+        let y = element.offset().top;
+        if (y != selectedY) {
+            if (nextRowY == -1) {
+                nextRowY = y;
+            } else if (y != nextRowY) {
+                break;
+            }
+            nextRow.push(element);
+        }
+    }
+    if (nextRow.length > 0) {
+        if (above) {
+            nextRow.reverse();
+        }
+        let selectedCenterX = selected.offset().left + selected.outerWidth() / 2;
+        let previousDistance = -1;
+        let nextIndex = -1;
+        $(nextRow).each(function() {
+            let centerX = $(this).offset().left + $(this).outerWidth() / 2;
+            let distance = Math.abs(centerX - selectedCenterX);
+            if (previousDistance >= 0 && distance > previousDistance) {
+                nextIndex = $(this).data('index') - 1;
+                return false;
+            }
+            previousDistance = distance;
+        });
+        if (nextIndex == -1) {
+            nextIndex = $(nextRow).last().data('index');
+        }
+        let next = $('[data-index="' + nextIndex + '"]');
+        selected.removeClass('selected');
+        next.addClass('selected');
+        scrollToPhoto(next);
+    }
+}
+
+function selectFirst() {
+    $('.grid-item.selected').removeClass('selected');
+    $('.grid-item').first().each(function() {
+        $(this).addClass('selected');
+        scrollToPhoto(this);
+    });
+}
+
+function selectLast() {
+    $('.grid-item.selected').removeClass('selected');
+    $('.grid-item').last().each(function() {
+        $(this).addClass('selected');
+        scrollToPhoto(this);
+    });
+}
+
+function deselect() {
+    $('.grid-item.selected').removeClass('selected');
+}
+
+function loadPhoto(gridItem, callback) {
+    if (!$(gridItem).data('loaded')) {
+        let request = new XMLHttpRequest();
+        request.onreadystatechange = function() {
+            if (this.status == 200) {
+                if (this.readyState == 4) {
+                    $(gridItem).html(request.responseText);
+                    let image = $(gridItem).children('.photo');
+                    $(image).on('load', function() {
+                        $(image).removeClass('transparent');
+                        $(image).on('click', function(event) {
+                            openLoupe($(this).parents('.grid-item'));
+                        });
+                        if (callback != undefined) {
+                            callback(gridItem);
+                        }
+                    });
+                    $(image).on('mouseenter', function(event) {
+                        selectPhoto($(event.target).parents('.grid-item'));
+                    });
+                    $(image).attr('src', $(image).data('src-thumbnail'));
+                    $(gridItem).data('loaded', true);
+                }
+            }
+        };
+        request.open('GET', $(gridItem).data('load-url'), true);
+        request.send();
+    } else {
+        if (callback != undefined) {
+            callback(gridItem);
+        }
     }
 }
 
 $(function() {
-    var observer = new IntersectionObserver(function(elements) {
+    let observer = new IntersectionObserver(function(elements) {
         $(elements).each(function() {
             if (this.isIntersecting) {
-                var grid_item = $(this.target);
-                if (!grid_item.data('loaded')) {
-                    var request = new XMLHttpRequest();
-                    request.onreadystatechange = function() {
-                        if (this.status == 200) {
-                            if (this.readyState == 4) {
-                                grid_item.html(request.responseText);
-                                var image = grid_item.children('.photo');
-                                $(image).on('load', function() {
-                                    $(image).removeClass('transparent');
-                                    $(image).on('click', function(event) {
-                                        openLoupe(this);
-                                    });
-                                });
-                                $(image).attr('src', $(image).data('src-thumbnail'));
-                                grid_item.data('loaded', true);
-                            }
-                        }
-                    };
-                    request.open('GET', grid_item.data('load-url'), true);
-                    request.send();
-                }
+                loadPhoto(this.target);
             }
         });
     }, {
@@ -103,13 +262,64 @@ $(function() {
     });
 
     window.onkeydown = function(event) {
-        if (isLoupeOpen()) {
-            if (event.key == 'Escape') {
+        if (event.code == 'Escape') {
+            event.preventDefault();
+            if (isLoupeOpen()) {
                 closeLoupe();
-            } else if (event.key == 'ArrowLeft') {
+            } else {
+                deselect();
+            }
+        } else if (event.code == 'ArrowLeft') {
+            event.preventDefault();
+            if (isLoupeOpen()) {
                 loupePrev();
-            } else if (event.key == 'ArrowRight') {
+            } else {
+                selectPrev();
+            }
+        } else if (event.code == 'ArrowRight') {
+            event.preventDefault();
+            if (isLoupeOpen()) {
                 loupeNext();
+            } else {
+                selectNext();
+            }
+        } else if (event.code == 'ArrowDown') {
+            event.preventDefault();
+            if (isLoupeOpen()) {
+                loupeNext();
+            } else {
+                selectBelow();
+            }
+        } else if (event.code == 'ArrowUp') {
+            event.preventDefault();
+            if (isLoupeOpen()) {
+                loupePrev();
+            } else {
+                selectAbove();
+            }
+        } else if (event.code == 'Home') {
+            event.preventDefault();
+            if (isLoupeOpen()) {
+                loupeFirst();
+            } else {
+                selectFirst();
+            }
+        } else if (event.code == 'End') {
+            event.preventDefault();
+            if (isLoupeOpen()) {
+                loupeLast();
+            } else {
+                selectLast();
+            }
+        } else if (event.code == 'Space' || event.code == 'Enter') {
+            event.preventDefault();
+            if (isLoupeOpen()) {
+                loupeNext();
+            } else {
+                let selected = $('.grid-item.selected');
+                if (selected.length > 0) {
+                    openLoupe(selected);
+                }
             }
         }
     };

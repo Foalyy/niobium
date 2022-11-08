@@ -1,3 +1,10 @@
+:root {
+    --row-height: 30vh;
+    --background-color: #101010;
+    --padding: 1px;
+    --selected-expansion: 1.5vh;
+}
+
 *, *::before, *::after {
     box-sizing: border-box;
     margin: 0;
@@ -11,7 +18,7 @@ html:focus-within {
 body {
     margin: 0;
     min-height: 100vh;
-    background-color: #101010;
+    background-color: var(--background-color);
     overflow-x: hidden;
     font-family: 'Open Sans';
 }
@@ -31,6 +38,7 @@ body {
     flex-wrap: wrap;
     justify-content: flex-start;
     align-content: flex-start;
+    padding: var(--padding);
 }
 
 .show-loupe .grid {
@@ -40,15 +48,19 @@ body {
 
 .grid .grid-item {
     flex-grow: 1;
-    height: 30vh;
+    height: var(--row-height);
     position: relative;
+    border: var(--padding) solid var(--background-color);
 }
 
 .grid .grid-item .photo {
+    position: relative;
+    top: 0px;
+    left: 0px;
     width: 100%;
-    height: 30vh;
+    height: calc(var(--row-height) - 2 * var(--padding));
     object-fit: cover;
-    padding: 1px;
+    padding: 0;
     cursor: zoom-in;
     opacity: 1;
     transition: opacity 0.5s ease;
@@ -58,19 +70,18 @@ body {
     opacity: 0;
 }
 
-.grid .grid-item .veil {
-    background-color: transparent;
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    pointer-events: none;
-    transition: background-color 0.2s ease;
-}
-
-.grid .grid-item .photo:hover + .veil {
-    background-color: #FFFFFF10;
+.grid .grid-item.selected .photo {
+    padding: 0;
+    transition: top, left, width, height, box-shadow;
+    transition-duration: 0.2s;
+    transition-timing-function: ease;
+    top: calc(-1 * var(--selected-expansion) - var(--padding) / 2);
+    height: calc(var(--row-height) + 2 * var(--selected-expansion));
+    left: calc(-1 * var(--selected-expansion) - var(--padding) / 2);
+    width: calc(100% + 2 * var(--selected-expansion));
+    box-shadow: 0px 0px 4vh #000000FF;
+    border: calc(2 * var(--padding)) solid var(--background-color);
+    z-index: 10;
 }
 
 .loupe {
@@ -82,6 +93,7 @@ body {
     display: none;
     cursor: zoom-out;
     opacity: 1;
+    z-index: 20;
     transition: opacity 1s ease;
     transition: background-color 0.5s ease;
 }
