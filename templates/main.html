@@ -14,10 +14,7 @@
         <div class="container">
             <div class="grid">
                 {% for photo in photos %}
-                    <div class="grid-item">
-                        <img class="photo" src="" data-src="{{ url_for('get_photo', uid=photo['uid']) }}" data-thumbnail="{{ url_for('get_thumbnail', uid=photo['uid']) }}" data-width="{{ photo['width'] }}" data-height="{{ photo['height'] }}" data-color="{{ photo['color'] }}" data-date="{{ photo['date'] }}" data-camera="{{ photo['camera_model'] }}" data-lens="{{ photo['lens_model'] }}" data-focal="{{ photo['focal_length'] }}" data-aperture="{{ photo['aperture'] }}" data-exposuretime="{{ photo['exposure_time'] }}" data-sensitivity="{{ photo['sensitivity'] }}">
-                        <div class="veil"></div>
-                    </div>
+                    <div class="grid-item" style="background-color: #{{ photo['color'] }}; aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }}" data-uid="{{ photo['uid'] }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}"></div>
                 {% endfor %}
             </div>
             <div class="loupe">

@@ -33,7 +33,13 @@ function loupeNext() {
 
 function setLoupeImage(element) {
     loupeElement = element;
-    $('.photo-large').attr('src', $(loupeElement).data('src'));
+    var photo = $('.loupe .photo-large');
+    photo.addClass('transparent');
+    photo.attr('src', '');
+    photo.one('load', function() {
+        photo.removeClass('transparent');
+    });
+    photo.attr('src', $(loupeElement).data('src-full'));
     $('.loupe').css('background-color', '#' + $(loupeElement).data('color') + 'FC');
     if ($(loupeElement).parent().prev().length > 0) {
         $('.loupe-prev').removeClass('hidden');
@@ -47,14 +53,29 @@ function setLoupeImage(element) {
     }
 }
 
-$(document).ready(function() {
-    $('.grid .grid-item .photo').each(function(index, element) {
-        $(element).attr('src', $(element).data('thumbnail'));
+$(function() {
+    $('.grid-item').each(function() {
+        var grid_item = $(this);
+        var request = new XMLHttpRequest();
+        request.onreadystatechange = function() {
+            if (this.status == 200) {
+                if (this.readyState == 4) {
+                    grid_item.html(request.responseText);
+                    var image = grid_item.children('.photo');
+                    $(image).on('load', function() {
+                        $(image).removeClass('transparent');
+                        $(image).on('click', function(event) {
+                            openLoupe(this);
+                        });
+                    });
+                    $(image).attr('src', $(image).data('src-thumbnail'));
+                }
+            }
+        };
+        request.open('GET', grid_item.data('load-url'), true);
+        request.send();
     });
 
-    $('.grid .grid-item .photo').on('click', function(event) {
-        openLoupe(this);
-    });
     $('.loupe-photo').on('click', function(event) {
         closeLoupe();
     });

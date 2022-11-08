@@ -50,6 +50,12 @@ body {
     object-fit: cover;
     padding: 1px;
     cursor: zoom-in;
+    opacity: 1;
+    transition: opacity 0.5s ease;
+}
+
+.grid .grid-item .photo.transparent {
+    opacity: 0;
 }
 
 .grid .grid-item .veil {
@@ -75,7 +81,7 @@ body {
     background-color: #202020FC;
     display: none;
     cursor: zoom-out;
-    opacity: 100%;
+    opacity: 1;
     transition: opacity 1s ease;
     transition: background-color 0.5s ease;
 }
@@ -94,6 +100,12 @@ body {
     width: 100vw;
     height: 100vh;
     object-fit: contain;
+    opacity: 1;
+    transition: opacity 1s ease;
+}
+
+.loupe .photo-large.transparent {
+    opacity: 0;
 }
 
 .loupe-prev, .loupe-next {

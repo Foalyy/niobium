@@ -1,5 +1,5 @@
 import os, random, toml, sqlite3
-from flask import Flask, current_app, g, render_template, abort, send_from_directory
+from flask import Flask, current_app, g, render_template, abort, send_from_directory, stream_with_context
 import werkzeug
 from wand.image import Image
 from pprint import pprint
@@ -75,55 +75,15 @@ def load_photos():
         # Find photos in the filesystem that are not yet in the database and insert them
         photos_to_insert = [filename for filename in filenames if filename not in [photo['filename'] for photo in photos_in_db]]
         if photos_to_insert:
+            rows_to_insert = []
             existing_uids = [photo['uid'] for photo in photos_in_db]
             for filename in photos_to_insert:
-                print(f"Opening {filename} and adding it to the database...")
-                row = {
-                    'filename': filename,
-                    'uid': '',
-                    'width': 0,
-                    'height': 0,
-                    'color': '',
-                    'date_taken': '',
-                    'camera_model': '',
-                    'lens_model': '',
-                    'focal_length': '',
-                    'aperture': '',
-                    'exposure_time': '',
-                    'sensitivity': '',
-                }
-
                 # Generate a new UID for this photo
-                row['uid'] = generate_uid(existing_uids)
-                existing_uids.append(row['uid'])
-
-                with Image(filename = app.config['PHOTOS_DIR'] + filename) as image:
-                    # Image dimensions
-                    row['width'] = image.width
-                    row['height'] = image.height
-
-                    # Compute the photo's average color
-                    average_color = [image.mean_channel(channel)[0] / image.quantum_range for channel in ['red', 'green', 'blue']]
-                    row['color'] = ''.join(['{:02x}'.format(int(channel_value * 255 / 8)) for channel_value in average_color])
-
-                    # Parse EXIF metadata
-                    if app.config['READ_EXIF']:
-                        for exif_key, db_key in EXIF_METADATA_MAPPING.items():
-                            if exif_key in image.metadata:
-                                try:
-                                    value = image.metadata[exif_key]
-                                    if db_key in ['focal_length', 'aperture'] and '/' in value:
-                                        value = value.split('/')
-                                        value = str(round(float(value[0]) / float(value[1]), len(value[1])))
-                                except Exception as e:
-                                    print(e)
-                                row[db_key] = value
-
-
-                cur.execute("""
-                    INSERT INTO photo(filename, uid, width, height, color, date_taken, camera_model, lens_model, focal_length, aperture, exposure_time, sensitivity)
-                    VALUES (:filename, :uid, :width, :height, :color, :date_taken, :camera_model, :lens_model, :focal_length, :aperture, :exposure_time, :sensitivity)
-                """, row)
+                uid = generate_uid(existing_uids)
+                existing_uids.append(uid)
+                rows_to_insert.append({'filename': filename, 'uid': uid})
+            print(f"Inserting {len(rows_to_insert)} photo(s) in the database : {', '.join(photos_to_insert)}")
+            cur.executemany("INSERT INTO photo(filename, uid) VALUES (:filename, :uid)", rows_to_insert)
 
         # Find photos in the database that are not in the filesystem anymore, and delete them
         photos_to_remove = [{'uid': photo['uid'], 'filename': photo['filename']} for photo in photos_in_db if photo['filename'] not in filenames]
@@ -150,6 +110,61 @@ def load_photos():
 
     return photos_in_db
 
+def parse_photo_metadata(photo):
+    print(f"Parsing metadata for photo {photo['filename']}...")
+    row = {
+        'uid': photo['uid'],
+        'width': 0,
+        'height': 0,
+        'color': '',
+        'date_taken': '',
+        'camera_model': '',
+        'lens_model': '',
+        'focal_length': '',
+        'aperture': '',
+        'exposure_time': '',
+        'sensitivity': '',
+    }
+    with Image(filename = app.config['PHOTOS_DIR'] + photo['filename']) as image:
+        # Image dimensions
+        row['width'] = image.width
+        row['height'] = image.height
+
+        # Compute the photo's average color
+        average_color = [image.mean_channel(channel)[0] / image.quantum_range for channel in ['red', 'green', 'blue']]
+        row['color'] = ''.join(['{:02x}'.format(int(channel_value * 255 / 8)) for channel_value in average_color])
+
+        # Parse EXIF metadata
+        if app.config['READ_EXIF']:
+            for exif_key, db_key in EXIF_METADATA_MAPPING.items():
+                if exif_key in image.metadata:
+                    try:
+                        value = image.metadata[exif_key]
+                        if db_key in ['focal_length', 'aperture'] and '/' in value:
+                            value = value.split('/')
+                            value = str(round(float(value[0]) / float(value[1]), len(value[1])))
+                    except Exception as e:
+                        print(e)
+                    row[db_key] = value
+    with get_db() as db:
+        cur = g.db.cursor()
+        cur.execute("UPDATE photo SET metadata_parsed=1, " + ', '.join([f"{key}=:{key}" for key in row if key != 'uid']) + " WHERE uid=:uid", row)
+
+def get_photo_from_uid(uid):
+    # Get the filename associated to this uid
+    with get_db() as db:
+        cur = g.db.cursor()
+        cur.execute("SELECT * FROM photo WHERE uid=:uid", {'uid': uid})
+        photo = cur.fetchone()
+    if photo is None:
+        abort(404)
+
+    # Parse metadata if not done already
+    if not photo['metadata_parsed']:
+        parse_photo_metadata(photo)
+
+    return photo
+
 
 ### App
 app = Flask(__name__)
@@ -162,22 +177,19 @@ app.teardown_appcontext(close_db)
 
 
 @app.route("/")
-def gallery():
+def get_gallery():
     photos = load_photos()
     return render_template('main.html', photos=photos)
 
 @app.route("/<uid>")
 def get_photo(uid):
-    # Get the filename associated to this uid
-    with get_db() as db:
-        cur = g.db.cursor()
-        cur.execute("SELECT filename FROM photo WHERE uid=?", (uid,))
-        photo = cur.fetchone()
-    if photo is None:
-        abort(404)
-
-    # Return the photo
+    photo = get_photo_from_uid(uid)
     return send_from_directory(app.config['PHOTOS_DIR'], photo['filename'])
+
+@app.route("/<uid>/grid-item")
+def get_grid_item(uid):
+    photo = get_photo_from_uid(uid)
+    return render_template('grid-item.html', photo=photo)
 
 @app.route("/<uid>/thumbnail")
 def get_thumbnail(uid):
