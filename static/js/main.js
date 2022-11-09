@@ -288,6 +288,16 @@ function loadPhoto(gridItem, callback) {
     }
 }
 
+function gridZoomIn() {
+    rowHeight *= 1 + rowHeightStep / 100.;
+    document.documentElement.style.setProperty('--row-height', rowHeight + 'vh');
+}
+
+function gridZoomOut() {
+    rowHeight /= 1 + rowHeightStep / 100.;
+    document.documentElement.style.setProperty('--row-height', rowHeight + 'vh');
+}
+
 $(function() {
     let observer = new IntersectionObserver(function(elements) {
         $(elements).each(function() {
@@ -317,6 +327,12 @@ $(function() {
     });
     $('.loupe-action-info').on('click', function(event) {
         $('.loupe-metadata').toggleClass('invisible');
+    });
+    $('.grid-action-zoom-in').on('click', function(event) {
+        gridZoomIn();
+    });
+    $('.grid-action-zoom-out').on('click', function(event) {
+        gridZoomOut();
     });
 
     window.onkeydown = function(event) {
@@ -380,6 +396,12 @@ $(function() {
                 }
                 openLoupe($('.grid-item.selected'));
             }
+        } else if (event.key == "+") {
+            event.preventDefault();
+            gridZoomIn();
+        } else if (event.key == "-") {
+            event.preventDefault();
+            gridZoomOut();
         }
     };
 });

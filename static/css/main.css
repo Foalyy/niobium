@@ -151,6 +151,7 @@ body {
 }
 
 .loupe-photo-index,
+.grid-button,
 .loupe-button {
     height: 2rem;
     display: flex;
@@ -162,9 +163,11 @@ body {
     opacity: 0.5;
 }
 
+.grid-button,
 .loupe-button {
     width: 2rem;
     cursor: pointer;
+    z-index: 15;
 }
 
 .loupe-prev:hover .loupe-button,
@@ -209,6 +212,7 @@ body {
     margin-left: 0.8em;
 }
 
+.grid-actions,
 .loupe-actions {
     position: absolute;
     right: 0;
