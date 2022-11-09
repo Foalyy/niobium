@@ -95,18 +95,19 @@ def load_photos():
         if photos_to_insert or photos_to_remove:
             photos_in_db = get_photos_from_db(db)
 
-        # Delete old thumbnails
-        thumbnails = [filename for filename in os.listdir(app.config['CACHE_DIR']) if filename.lower().startswith('thumbnail_') and filename.lower().endswith('.jpg')];
-        thumbnails_to_delete = []
+        # Delete old resized photos from cache
+        resized_photos_to_delete = []
         all_uids = [photo['uid'] for photo in photos_in_db]
-        for thumbnail in thumbnails:
-            uid = thumbnail[len('thumbnail_'): -len('.jpg')]
-            if not uid in all_uids:
-                thumbnails_to_delete.append(thumbnail)
-        if thumbnails_to_delete:
-            print(f"Deleting {len(thumbnails_to_delete)} obsolete thumbnails : {', '.join(thumbnails_to_delete)}")
-            for thumbnail in thumbnails_to_delete:
-                os.remove(app.config['CACHE_DIR'] + thumbnail)
+        for prefix in ['thumbnail_', 'large_']:
+            resized_photos = [filename for filename in os.listdir(app.config['CACHE_DIR']) if filename.lower().startswith(prefix) and filename.lower().endswith('.jpg')];
+            for resized_photo in resized_photos:
+                uid = resized_photo[len(prefix): -len('.jpg')]
+                if not uid in all_uids:
+                    resized_photos_to_delete.append(resized_photo)
+        if resized_photos_to_delete:
+            print(f"Deleting {len(resized_photos_to_delete)} obsolete resized photos from cache : {', '.join(resized_photos_to_delete)}")
+            for resized_photo in resized_photos_to_delete:
+                os.remove(app.config['CACHE_DIR'] + resized_photo)
 
     return photos_in_db
 
@@ -165,6 +166,41 @@ def get_photo_from_uid(uid):
 
     return photo
 
+def get_resized_photo(uid, prefix, max_size):
+    # Return the resized photo from the cache folder if it exists
+    resized_filename = prefix + '_' + uid + '.jpg'
+    try:
+        return send_from_directory(app.config['CACHE_DIR'], resized_filename)
+
+    except werkzeug.exceptions.NotFound as e:
+        # This resized version doesn't exist, try to generate it
+
+        # Get the filename associated to this uid
+        with get_db() as db:
+            cur = g.db.cursor()
+            cur.execute("SELECT filename FROM photo WHERE uid=?", (uid,))
+            row = cur.fetchone()
+        if row is None:
+            abort(404)
+        filename = row['filename']
+
+        # Resize the image and save it to the cache directory
+        photo = Image(filename = app.config['PHOTOS_DIR'] + filename)
+        max_size = max_size
+        if photo.width > max_size or photo.height > max_size:
+            # Find the best ratio to make the image fit into the max dimension
+            resized_width = max_size
+            resize_ratio = photo.width / max_size
+            resized_height = photo.height / resize_ratio
+            if resized_height > max_size:
+                resize_ratio = photo.height / max_size
+                resized_height = max_size
+                resized_width = photo.width / resize_ratio
+            photo.resize(round(resized_width), round(resized_height))
+        photo.save(filename = app.config['CACHE_DIR'] + resized_filename)
+        print(f"Resized version ({prefix}) of {filename} generated in the cache directory")
+        return send_from_directory(app.config['CACHE_DIR'], resized_filename)
+
 
 ### App
 app = Flask(__name__)
@@ -193,39 +229,11 @@ def get_grid_item(uid):
 
 @app.route("/<uid>/thumbnail")
 def get_thumbnail(uid):
-    # Return the thumbnail from the cache folder if it exists
-    thumbnail_filename = 'thumbnail_' + uid + '.jpg'
-    try:
-        return send_from_directory(app.config['CACHE_DIR'], thumbnail_filename)
+    return get_resized_photo(uid, prefix='thumbnail', max_size=app.config['THUMBNAIL_MAX_SIZE'])
 
-    except werkzeug.exceptions.NotFound as e:
-        # The thumbnail doesn't exist, try to generate it
-
-        # Get the filename associated to this uid
-        with get_db() as db:
-            cur = g.db.cursor()
-            cur.execute("SELECT filename FROM photo WHERE uid=?", (uid,))
-            row = cur.fetchone()
-        if row is None:
-            abort(404)
-        filename = row['filename']
-
-        # Resize the image and save it to the cache directory
-        photo = Image(filename = app.config['PHOTOS_DIR'] + filename)
-        max_size = app.config['THUMBNAIL_MAX_SIZE']
-        if photo.width > max_size or photo.height > max_size:
-            # Find the best ratio to make the image fit into the max dimension
-            resized_width = max_size
-            resize_ratio = photo.width / max_size
-            resized_height = photo.height / resize_ratio
-            if resized_height > max_size:
-                resize_ratio = photo.height / max_size
-                resized_height = max_size
-                resized_width = photo.width / resize_ratio
-            photo.resize(round(resized_width), round(resized_height))
-        photo.save(filename = app.config['CACHE_DIR'] + thumbnail_filename)
-        print(f"Thumbnail for {filename} generated in the cache directory")
-        return send_from_directory(app.config['CACHE_DIR'], thumbnail_filename)
+@app.route("/<uid>/large")
+def get_large(uid):
+    return get_resized_photo(uid, prefix='large', max_size=app.config['LARGE_VIEW_MAX_SIZE'])
 
 @app.errorhandler(404)
 def page_not_found(error):

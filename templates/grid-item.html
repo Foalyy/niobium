@@ -1,8 +1,9 @@
 <img
     class="photo transparent"
     src=""
-    data-src-full="{{ url_for('get_photo', uid=photo['uid']) }}"
     data-src-thumbnail="{{ url_for('get_thumbnail', uid=photo['uid']) }}"
+    data-src-large="{{ url_for('get_large', uid=photo['uid']) }}"
+    data-src-full="{{ url_for('get_photo', uid=photo['uid']) }}"
     data-width="{{ photo['width'] }}"
     data-height="{{ photo['height'] }}"
     data-color="#{{ photo['color'] }}"

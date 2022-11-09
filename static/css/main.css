@@ -142,12 +142,21 @@ body {
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 6rem;
+    width: 20vw;
     display: flex;
     align-items: flex-end;
-    justify-content: center;
     cursor: pointer;
     padding-bottom: 3em;
+}
+
+.loupe-prev {
+    justify-content: flex-start;
+    padding-left: 1.5rem;
+}
+
+.loupe-next {
+    justify-content: flex-end;
+    padding-right: 1.5rem;
 }
 
 .loupe-prev {
