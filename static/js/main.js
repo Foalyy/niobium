@@ -2,6 +2,7 @@ let savedScroll = 0;
 let loupeElement = undefined;
 let opacityTransitionInProgress = false;
 let opacityTransitionTimeout = undefined;
+let slideshowIntervalTimer = undefined;
 
 function openLoupe(gridItem) {
     savedScroll = window.pageYOffset;
@@ -132,6 +133,7 @@ function setLoupePhoto(gridItem) {
 }
 
 function closeLoupe() {
+    stopSlideshow();
     window.location.hash = '';
     $('.container').removeClass('show-loupe');
     window.scrollTo(0, savedScroll);
@@ -150,11 +152,13 @@ function loupePrev() {
     }
 }
 
-function loupeNext() {
+function loupeNext(loop=false) {
     let next = $(loupeElement).parent().next();
     if (next.length > 0) {
         setLoupePhoto(next);
         selectPhoto(next);
+    } else if (loop) {
+        loupeFirst();
     }
 }
 
@@ -168,6 +172,29 @@ function loupeLast() {
     let last = $(loupeElement).parents('.grid').children().last();
     setLoupePhoto(last);
     selectPhoto(last);
+}
+
+function startSlideshow() {
+    if (!slideshowIntervalTimer) {
+        $('.loupe-action-slideshow-start').addClass('hidden');
+        $('.loupe-action-slideshow-stop').removeClass('hidden');
+        slideshowIntervalTimer = setInterval(function() {
+            loupeNext(true);
+        }, slideshowDelay);
+    }
+}
+
+function stopSlideshow() {
+    if (slideshowIntervalTimer) {
+        $('.loupe-action-slideshow-start').removeClass('hidden');
+        $('.loupe-action-slideshow-stop').addClass('hidden');
+        clearInterval(slideshowIntervalTimer);
+        slideshowIntervalTimer = undefined;
+    }
+}
+
+function isSlideshowStarted() {
+    return slideshowIntervalTimer != undefined;
 }
 
 function scrollToPhoto(element) {
@@ -382,6 +409,12 @@ $(function() {
     $('.loupe-action-info').on('click', function(event) {
         $('.loupe-metadata').toggleClass('invisible');
     });
+    $('.loupe-action-slideshow-start').on('click', function(event) {
+        startSlideshow();
+    });
+    $('.loupe-action-slideshow-stop').on('click', function(event) {
+        stopSlideshow();
+    });
     $('.grid-action-zoom-in').on('click', function(event) {
         gridZoomIn();
     });
@@ -449,6 +482,9 @@ $(function() {
                     selectFirst();
                 }
                 openLoupe($('.grid-item.selected'));
+                if (event.code == 'Space') {
+                    startSlideshow();
+                }
             }
         } else if (event.key == "+") {
             event.preventDefault();
