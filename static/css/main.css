@@ -1,5 +1,4 @@
 :root {
-    --row-height: 30vh;
     --background-color: #101010;
     --padding: 1px;
     --selected-expansion: 1.5vh;
@@ -72,7 +71,7 @@ body {
 
 .show-loupe .grid {
     height: 100vh;
-    overflow-y: hidden;
+    overflow-x: hidden;
 }
 
 .grid .grid-item {
@@ -268,7 +267,7 @@ body {
 
 .grid-actions,
 .loupe-actions {
-    position: absolute;
+    position: fixed;
     right: 0;
     top: 0;
     padding: 2em;
@@ -278,6 +277,7 @@ body {
     align-items: center;
     align-content: center;
     gap: 1em;
+    z-index: 20;
 }
 
 .loupe-photo-index {
