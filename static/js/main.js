@@ -1,5 +1,7 @@
 let savedScroll = 0;
 let loupeElement = undefined;
+let opacityTransitionInProgress = false;
+let opacityTransitionTimeout = undefined;
 
 function openLoupe(gridItem) {
     savedScroll = window.pageYOffset;
@@ -11,78 +13,119 @@ function openLoupe(gridItem) {
 function setLoupePhoto(gridItem) {
     loadPhoto(gridItem, function(gridItem) {
         window.location.hash = $(gridItem).data('uid');
+        $('.loupe-photo-index').children('span').text($(gridItem).data('index') + " / " + $('.grid-item').last().data('index'));
         loupeElement = $(gridItem).children('.photo');
         let photo = $('.loupe .photo-large');
-        photo.addClass('transparent');
-        photo.attr('src', '');
-        photo.one('load', function() {
-            photo.removeClass('transparent');
-        });
-        photo.attr('src', $(loupeElement).data('src-full'));
-        $('.loupe').css('background-color', $(loupeElement).data('color') + 'FC');
-        if ($(loupeElement).parent().prev().length > 0) {
-            $('.loupe-prev').removeClass('hidden');
-        } else {
-            $('.loupe-prev').addClass('hidden');
-        }
-        if ($(loupeElement).parent().next().length > 0) {
-            $('.loupe-next').removeClass('hidden');
-        } else {
-            $('.loupe-next').addClass('hidden');
-        }
-        $('.loupe-photo-index').children('span').text(gridItem.data('index') + " / " + $('.grid-item').last().data('index'));
-        if ($('.loupe-metadata').length > 0) {
-            const properties = ['title', 'date', 'place', 'camera', 'lens', 'focal-length', 'aperture', 'exposure-time', 'sensitivity'];
-            let showInfoButton = false;
-            let showSettings = false;
-            properties.forEach(function(property) {
-                let infoElement = $('.loupe-metadata-' + property);
-                infoElement.text('');
-                let value = $(loupeElement).data(property);
-                if (typeof(value) == 'string') {
-                    value = value.trim();
-                }
-                if (value) {
-                    showInfoButton = true;
-                }
-                if (property == 'focal-length') {
-                    if (value) {
-                        infoElement.text(value + "mm");
-                        showSettings = true;
-                    }
-                } else if (property == 'aperture') {
-                    if (value) {
-                        infoElement.text("f/" + value);
-                        showSettings = true;
-                    }
-                } else if (property == 'exposure-time') {
-                    if (value) {
-                        infoElement.text(value + "s");
-                        showSettings = true;
-                    }
-                } else if (property == 'sensitivity') {
-                    if (value) {
-                        infoElement.text("ISO " + value);
-                        showSettings = true;
-                    }
-                } else {
-                    if (value) {
-                        infoElement.text(value);
-                        infoElement.parent().show();
-                    } else {
-                        infoElement.parent().hide();
-                    }
-                }
-            });
-            if (showInfoButton) {
-                $('.loupe-action-info').removeClass('hidden');
-            } else {
-                $('.loupe-action-info').addClass('hidden');
+        let loadNext = function() {
+            opacityTransitionInProgress = false;
+            if (opacityTransitionTimeout) {
+                clearTimeout(opacityTransitionTimeout);
+                opacityTransitionTimeout = undefined;
             }
-            if (showSettings) {
-                $('.loupe-metadata-settings').removeClass('hidden');
+            photo.attr('src', '');
+            photo.one('load', function() {
+                photo.removeClass('transparent');
+            });
+            photo.attr('src', $(loupeElement).data('src-full'));
+            $('.loupe').css('background-color', $(loupeElement).data('color') + 'FC');
+            if ($(loupeElement).parent().prev().length > 0) {
+                $('.loupe-prev').removeClass('hidden');
             } else {
-                $('.loupe-metadata-settings').addClass('hidden');
+                $('.loupe-prev').addClass('hidden');
+            }
+            if ($(loupeElement).parent().next().length > 0) {
+                $('.loupe-next').removeClass('hidden');
+            } else {
+                $('.loupe-next').addClass('hidden');
+            }
+            if ($('.loupe-metadata').length > 0) {
+                const properties = ['title', 'date', 'place', 'camera', 'lens', 'focal-length', 'aperture', 'exposure-time', 'sensitivity'];
+                let showInfoButton = false;
+                let showGear = false;
+                let showSettings = false;
+                properties.forEach(function(property) {
+                    let infoElement = $('.loupe-metadata-' + property);
+                    infoElement.text('');
+                    let value = $(loupeElement).data(property);
+                    if (typeof(value) == 'string') {
+                        value = value.trim();
+                    }
+                    if (value) {
+                        showInfoButton = true;
+                    }
+                    if (property == 'camera') {
+                        if (value) {
+                            infoElement.text(value);
+                            showGear = true;
+                        }
+                    } else if (property == 'lens') {
+                        if (value) {
+                            infoElement.text(value);
+                            showGear = true;
+                        }
+                    } else if (property == 'focal-length') {
+                        if (value) {
+                            infoElement.text(value + "mm");
+                            showSettings = true;
+                        }
+                    } else if (property == 'aperture') {
+                        if (value) {
+                            infoElement.text("f/" + value);
+                            showSettings = true;
+                        }
+                    } else if (property == 'exposure-time') {
+                        if (value) {
+                            infoElement.text(value + "s");
+                            showSettings = true;
+                        }
+                    } else if (property == 'sensitivity') {
+                        if (value) {
+                            infoElement.text("ISO " + value);
+                            showSettings = true;
+                        }
+                    } else {
+                        if (value) {
+                            infoElement.text(value);
+                            infoElement.parent().removeClass('hidden');
+                        } else {
+                            infoElement.parent().addClass('hidden');
+                        }
+                    }
+                });
+                if (showInfoButton) {
+                    $('.loupe-action-info').removeClass('hidden');
+                } else {
+                    $('.loupe-action-info').addClass('hidden');
+                }
+                if (showGear) {
+                    $('.loupe-metadata-gear').removeClass('hidden');
+                } else {
+                    $('.loupe-metadata-gear').addClass('hidden');
+                }
+                if (showSettings) {
+                    $('.loupe-metadata-settings').removeClass('hidden');
+                } else {
+                    $('.loupe-metadata-settings').addClass('hidden');
+                }
+            }
+        };
+        if (!opacityTransitionInProgress) {
+            if (photo.hasClass('transparent')) {
+                loadNext();
+            } else {
+                photo.one('transitionend', function() {
+                    if (event.propertyName == 'opacity' && photo.hasClass('transparent')) {
+                        loadNext();
+                    }
+                });
+                opacityTransitionInProgress = true;
+                if (opacityTransitionTimeout) {
+                    clearTimeout(opacityTransitionTimeout);
+                }
+                opacityTransitionTimeout = setTimeout(function() {
+                    loadNext();
+                }, 800);
+                photo.addClass('transparent');
             }
         }
     });

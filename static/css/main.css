@@ -116,7 +116,7 @@ body {
     height: 100vh;
     object-fit: contain;
     opacity: 1;
-    transition: opacity 1s ease;
+    transition: opacity 0.3s ease;
 }
 
 .loupe .photo-large.transparent {
@@ -191,7 +191,6 @@ body {
     position: absolute;
     left: 0;
     right: 0;
-    bottom: 0;
     width: 100vw;
     padding: 2em;
     color: white;
@@ -202,10 +201,24 @@ body {
     align-content: center;
     gap: 1em;
     opacity: 0.7;
-    transition: opacity 0.5s ease, bottom 0.8s ease;
+    transition: opacity 0.5s ease, top 0.8s ease, bottom 0.8s ease;
 }
 
-.loupe-metadata.invisible {
+.loupe-metadata-top {
+    top: 0;
+    font-size: 120%;
+}
+
+.loupe-metadata-bottom {
+    bottom: 0;
+}
+
+.loupe-metadata-top.invisible {
+    opacity: 0;
+    top: -2em;
+}
+
+.loupe-metadata-bottom.invisible {
     opacity: 0;
     bottom: -2em;
 }
@@ -220,7 +233,7 @@ body {
 }
 
 .loupe-metadata-element span {
-    margin-left: 0.8em;
+    margin-left: 0.9em;
 }
 
 .grid-actions,
