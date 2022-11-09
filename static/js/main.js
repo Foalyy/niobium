@@ -140,7 +140,10 @@ function closeLoupe() {
     window.location.hash = '';
     $('.container').removeClass('show-loupe');
     window.scrollTo(0, savedScroll);
-    scrollToPhoto($('.grid-item.selected'));
+    let selected = $('.grid-item.selected');
+    if (selected.length > 0) {
+        scrollToPhoto(selected);
+    }
 }
 
 function isLoupeOpen() {
@@ -340,7 +343,9 @@ function loadPhoto(gridItem, callback) {
                     $(image).on('load', function() {
                         $(image).removeClass('transparent');
                         $(image).on('click', function(event) {
-                            openLoupe($(this).parents('.grid-item'));
+                            let openGridItem = $(this).parents('.grid-item');
+                            selectPhoto(openGridItem);
+                            openLoupe(openGridItem);
                         });
                         if (callback != undefined) {
                             callback(gridItem);
@@ -475,7 +480,7 @@ $(function() {
             } else {
                 selectLast();
             }
-        } else if (event.code == 'Space' || event.code == 'Enter' || event.code == 'KeyF') {
+        } else if (event.code == 'Enter' || event.code == 'KeyF') {
             event.preventDefault();
             if (isLoupeOpen()) {
                 loupeNext();
@@ -485,9 +490,22 @@ $(function() {
                     selectFirst();
                 }
                 openLoupe($('.grid-item.selected'));
-                if (event.code == 'Space') {
+            }
+        } else if (event.code == 'Space') {
+            event.preventDefault();
+            if (isLoupeOpen()) {
+                if (isSlideshowStarted()) {
+                    stopSlideshow();
+                } else {
                     startSlideshow();
                 }
+            } else {
+                let selected = $('.grid-item.selected');
+                if (selected.length == 0) {
+                    selectFirst();
+                }
+                openLoupe($('.grid-item.selected'));
+                startSlideshow();
             }
         } else if (event.key == "+") {
             event.preventDefault();
