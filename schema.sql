@@ -9,6 +9,7 @@ CREATE TABLE photo (
     height INTEGER NULL DEFAULT NULL,
     color VARCHAR(16) NOT NULL DEFAULT '',
     title VARCHAR(255) NOT NULL DEFAULT '',
+    place VARCHAR(255) NOT NULL DEFAULT '',
     date_taken VARCHAR(16) NOT NULL DEFAULT '',
     camera_model VARCHAR(255) NOT NULL DEFAULT '',
     lens_model VARCHAR(255) NOT NULL DEFAULT '',

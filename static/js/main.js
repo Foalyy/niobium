@@ -29,6 +29,61 @@ function setLoupePhoto(gridItem) {
         } else {
             $('.loupe-next').addClass('hidden');
         }
+        $('.loupe-photo-index').children('span').text(gridItem.data('index') + " / " + $('.grid-item').last().data('index'));
+        if ($('.loupe-metadata').length > 0) {
+            const properties = ['title', 'date', 'place', 'camera', 'lens', 'focal-length', 'aperture', 'exposure-time', 'sensitivity'];
+            let showInfoButton = false;
+            let showSettings = false;
+            properties.forEach(function(property) {
+                let infoElement = $('.loupe-metadata-' + property);
+                infoElement.text('');
+                let value = $(loupeElement).data(property);
+                if (typeof(value) == 'string') {
+                    value = value.trim();
+                }
+                if (value) {
+                    showInfoButton = true;
+                }
+                if (property == 'focal-length') {
+                    if (value) {
+                        infoElement.text(value + "mm");
+                        showSettings = true;
+                    }
+                } else if (property == 'aperture') {
+                    if (value) {
+                        infoElement.text("f/" + value);
+                        showSettings = true;
+                    }
+                } else if (property == 'exposure-time') {
+                    if (value) {
+                        infoElement.text(value + "s");
+                        showSettings = true;
+                    }
+                } else if (property == 'sensitivity') {
+                    if (value) {
+                        infoElement.text("ISO " + value);
+                        showSettings = true;
+                    }
+                } else {
+                    if (value) {
+                        infoElement.text(value);
+                        infoElement.parent().show();
+                    } else {
+                        infoElement.parent().hide();
+                    }
+                }
+            });
+            if (showInfoButton) {
+                $('.loupe-action-info').removeClass('hidden');
+            } else {
+                $('.loupe-action-info').addClass('hidden');
+            }
+            if (showSettings) {
+                $('.loupe-metadata-settings').removeClass('hidden');
+            } else {
+                $('.loupe-metadata-settings').addClass('hidden');
+            }
+        }
     });
 }
 
@@ -260,6 +315,9 @@ $(function() {
         event.preventDefault();
         event.stopPropagation();
     });
+    $('.loupe-action-info').on('click', function(event) {
+        $('.loupe-metadata').toggleClass('invisible');
+    });
 
     window.onkeydown = function(event) {
         if (event.code == 'Escape') {
@@ -311,15 +369,16 @@ $(function() {
             } else {
                 selectLast();
             }
-        } else if (event.code == 'Space' || event.code == 'Enter') {
+        } else if (event.code == 'Space' || event.code == 'Enter' || event.code == 'KeyF') {
             event.preventDefault();
             if (isLoupeOpen()) {
                 loupeNext();
             } else {
                 let selected = $('.grid-item.selected');
-                if (selected.length > 0) {
-                    openLoupe(selected);
+                if (selected.length == 0) {
+                    selectFirst();
                 }
+                openLoupe($('.grid-item.selected'));
             }
         }
     };

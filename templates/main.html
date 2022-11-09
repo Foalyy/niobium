@@ -23,9 +23,22 @@
                     <div class="loupe-prev"><div class="loupe-button"><i class="fa-solid fa-chevron-left"></i></div></div>
                     <div class="loupe-next"><div class="loupe-button"><i class="fa-solid fa-chevron-right"></i></div></div>
                 </div>
-                <div class="loupe-info">
-                    <div class="loupe-info-title">Title</div>
+                {% if config.SHOW_METADATA %}
+                    <div class="loupe-metadata{% if config.METADATA_VISIBLE_BY_DEFAULT == False %} invisible{% endif %}">
+                        <div class="loupe-metadata-element"><i class="fa-solid fa-image"></i> <span class="loupe-metadata-title"></span></div>
+                        <div class="loupe-metadata-element"><i class="fa-solid fa-calendar-days"></i> <span class="loupe-metadata-date"></span></div>
+                        <div class="loupe-metadata-element"><i class="fa-solid fa-map-marker-alt"></i> <span class="loupe-metadata-place"></span></div>
+                        <div class="loupe-metadata-element"><i class="fa-solid fa-camera-retro"></i> <span class="loupe-metadata-camera"></span></div>
+                        <div class="loupe-metadata-element"><i class="fa-solid fa-binoculars"></i> <span class="loupe-metadata-lens"></span></div>
+                        <div class="loupe-metadata-element loupe-metadata-settings"><i class="fa-solid fa-sliders"></i> <span class="loupe-metadata-focal-length"></span> <span class="loupe-metadata-aperture"></span> <span class="loupe-metadata-exposure-time"></span> <span class="loupe-metadata-sensitivity"></span></div>
+                    </div>
+                {% endif %}
+                <div class="loupe-actions">
+                    {% if config.SHOW_METADATA %}
+                        <div class="loupe-button loupe-action-info"><i class="fa-solid fa-info-circle"></i></div>
+                    {% endif %}
                 </div>
+                <div class="loupe-photo-index"><span></span></div>
             </div>
         </div>
 

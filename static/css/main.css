@@ -87,6 +87,7 @@ body {
 .loupe {
     position: absolute;
     width: 100vw;
+    height: 100vh;
     top: 0;
     left: 0;
     background-color: #202020FC;
@@ -94,6 +95,7 @@ body {
     cursor: zoom-out;
     opacity: 1;
     z-index: 20;
+    overflow: hidden;
     transition: opacity 1s ease;
     transition: background-color 0.5s ease;
 }
@@ -102,6 +104,7 @@ body {
     width: 100vw;
     height: 100vh;
     position: relative;
+    overflow: hidden;
 }
 
 .show-loupe .loupe {
@@ -147,23 +150,82 @@ body {
     display: none;
 }
 
+.loupe-photo-index,
 .loupe-button {
-    width: 2rem;
     height: 2rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: #FFFFFF10;
+    background-color: #101010F0;
     border-radius: 1rem;
+    color: #A0A0A0;
+    opacity: 0.5;
+}
+
+.loupe-button {
+    width: 2rem;
+    cursor: pointer;
 }
 
 .loupe-prev:hover .loupe-button,
 .loupe-next:hover .loupe-button {
-    background-color: #FFFFFF20;
+    background-color: #101010F0;
     transition: background-color 0.2s ease;
 }
 
-.loupe-info {
-    background-color: #F0F0FF;
-    height: 5rem;
+.loupe-metadata {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    padding: 2em;
+    color: white;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-evenly;
+    align-items: center;
+    align-content: center;
+    gap: 1em;
+    opacity: 0.7;
+    transition: opacity 0.5s ease, bottom 0.8s ease;
+}
+
+.loupe-metadata.invisible {
+    opacity: 0;
+    bottom: -2em;
+}
+
+.loupe-metadata-element {
+    height: 2.4em;
+    padding: 0.5em 1em;
+    background-color: #101010A0;
+    border-radius: 1.2em;
+    display: flex;
+    align-items: center;
+}
+
+.loupe-metadata-element span {
+    margin-left: 0.8em;
+}
+
+.loupe-actions {
+    position: absolute;
+    right: 0;
+    top: 0;
+    padding: 2em;
+    display: flex;
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+    align-items: center;
+    align-content: center;
+    gap: 1em;
+}
+
+.loupe-photo-index {
+    position: absolute;
+    top: 2em;
+    left: 2em;
+    padding: 1em;
+    min-width: 2rem;
 }
