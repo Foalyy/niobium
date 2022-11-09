@@ -235,6 +235,11 @@ def get_thumbnail(uid):
 def get_large(uid):
     return get_resized_photo(uid, prefix='large', max_size=app.config['LARGE_VIEW_MAX_SIZE'])
 
+@app.route("/<uid>/download")
+def download_photo(uid):
+    photo = get_photo_from_uid(uid)
+    return send_from_directory(app.config['PHOTOS_DIR'], photo['filename'], as_attachment=True)
+
 @app.errorhandler(404)
 def page_not_found(error):
     return render_template('404.html'), 404

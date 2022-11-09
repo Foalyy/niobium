@@ -49,6 +49,9 @@
                     <div class="loupe-button loupe-action-info" title="Toggle metadata display"><i class="fa-solid fa-info-circle"></i></div>
                     <div class="loupe-button loupe-action-slideshow-start" title="Start slideshow"><i class="fa-solid fa-play"></i></div>
                     <div class="loupe-button loupe-action-slideshow-stop hidden" title="Pause slideshow"><i class="fa-solid fa-pause"></i></div>
+                    {% if config.SHOW_DOWNLOAD_BUTTON %}
+                        <div class="loupe-button loupe-action-download" title="Download this photo in original resolution"><i class="fa-solid fa-download"></i></div>
+                    {% endif %}
                 </div>
                 <div class="loupe-photo-index"><span></span></div>
                 <div class="loading hidden">

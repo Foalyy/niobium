@@ -42,6 +42,12 @@ function setLoupePhoto(gridItem) {
             } else {
                 $('.loupe-next').addClass('hidden');
             }
+            $('.loupe-action-download').off('click');
+            $('.loupe-action-download').on('click', function(event) {
+                event.preventDefault();
+                event.stopPropagation();
+                window.open($(loupeElement).data('src-download'));
+            });
             if ($('.loupe-metadata').length > 0) {
                 const properties = ['title', 'date', 'place', 'camera', 'lens', 'focal-length', 'aperture', 'exposure-time', 'sensitivity'];
                 let showInfoButton = false;
