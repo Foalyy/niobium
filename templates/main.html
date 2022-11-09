@@ -17,8 +17,11 @@
                     <div class="grid-item" style="background-color: #{{ photo['color'] }}; aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }}" data-uid="{{ photo['uid'] }}" data-index="{{ loop.index }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}" data-loaded="false"></div>
                 {% endfor %}
                 <div class="grid-actions">
-                    <div class="grid-button grid-action-zoom-in"><i class="fa-solid fa-magnifying-glass-plus"></i></div>
-                    <div class="grid-button grid-action-zoom-out"><i class="fa-solid fa-magnifying-glass-minus"></i></div>
+                    {% if config.INSTAGRAM %}
+                        <div class="grid-button grid-action-instagram" title="Instagram"><a href="https://www.instagram.com/{{ config.INSTAGRAM }}/" target="_blank"><i class="fa-brands fa-instagram"></i></a></div>
+                    {% endif %}
+                    <div class="grid-button grid-action-zoom-out" title="Zoom out"><i class="fa-solid fa-magnifying-glass-minus"></i></div>
+                    <div class="grid-button grid-action-zoom-in" title="Zoom in"><i class="fa-solid fa-magnifying-glass-plus"></i></div>
                 </div>
             </div>
             <div class="loupe">
@@ -39,7 +42,7 @@
                 {% endif %}
                 <div class="loupe-actions">
                     {% if config.SHOW_METADATA %}
-                        <div class="loupe-button loupe-action-info"><i class="fa-solid fa-info-circle"></i></div>
+                        <div class="loupe-button loupe-action-info" title="Toggle metadata display"><i class="fa-solid fa-info-circle"></i></div>
                     {% endif %}
                 </div>
                 <div class="loupe-photo-index"><span></span></div>

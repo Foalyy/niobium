@@ -1,4 +1,5 @@
 TITLE = "Shashin"
+INSTAGRAM = "eisenheim_photo"
 PHOTOS_DIR = "photos/"
 CACHE_DIR = "cache/"
 DEFAULT_ROW_HEIGHT = 30 # vh
