@@ -10,7 +10,8 @@ function openLoupe(gridItem) {
 
 function setLoupePhoto(gridItem) {
     loadPhoto(gridItem, function(gridItem) {
-        loupeElement = gridItem.children('.photo');
+        window.location.hash = $(gridItem).data('uid');
+        loupeElement = $(gridItem).children('.photo');
         let photo = $('.loupe .photo-large');
         photo.addClass('transparent');
         photo.attr('src', '');
@@ -88,6 +89,7 @@ function setLoupePhoto(gridItem) {
 }
 
 function closeLoupe() {
+    window.location.hash = '';
     $('.container').removeClass('show-loupe');
     window.scrollTo(0, savedScroll);
     scrollToPhoto($('.grid-item.selected'));
@@ -311,6 +313,15 @@ $(function() {
     $('.grid-item').each(function() {
         observer.observe(this);
     });
+
+    if (window.location.hash) {
+        let uid = window.location.hash.substr(1);
+        let gridItem = $('[data-uid="' + uid + '"');
+        if (gridItem.length > 0) {
+            selectPhoto(gridItem);
+            openLoupe(gridItem);
+        }
+    }
 
     $('.loupe-photo').on('click', function(event) {
         closeLoupe();
