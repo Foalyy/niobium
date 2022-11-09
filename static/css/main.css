@@ -32,6 +32,34 @@ body {
     min-height: 100vh;
 }
 
+.loading {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.spinner {
+    font-size: 20px;
+    color: white;
+    opacity: 0.1;
+    animation: rotation 1s infinite;
+    animation-timing-function: linear;
+}
+
+@keyframes rotation {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(359deg);
+    }
+}
+
 .grid {
     display: flex;
     flex-direction: row;

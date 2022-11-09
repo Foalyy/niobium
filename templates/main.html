@@ -14,7 +14,11 @@
         <div class="container">
             <div class="grid">
                 {% for photo in photos %}
-                    <div class="grid-item" style="background-color: #{{ photo['color'] }}; aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }}" data-uid="{{ photo['uid'] }}" data-index="{{ loop.index }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}" data-loaded="false"></div>
+                    <div class="grid-item" style="background-color: #{{ photo['color'] }}; aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }}" data-uid="{{ photo['uid'] }}" data-index="{{ loop.index }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}" data-loaded="false">
+                        <div class="loading">
+                            <div class="spinner"><i class="fas fa-spinner"></i></div>
+                        </div>
+                    </div>
                 {% endfor %}
             </div>
             <div class="grid-actions">
@@ -47,6 +51,9 @@
                     <div class="loupe-button loupe-action-slideshow-stop hidden" title="Pause slideshow"><i class="fa-solid fa-pause"></i></div>
                 </div>
                 <div class="loupe-photo-index"><span></span></div>
+                <div class="loading hidden">
+                    <div class="spinner"><i class="fas fa-spinner"></i></div>
+                </div>
             </div>
         </div>
 

@@ -8,6 +8,7 @@ function openLoupe(gridItem) {
     savedScroll = window.pageYOffset;
     setLoupePhoto(gridItem);
     $('.container').addClass('show-loupe');
+    $('.loupe .loading').removeClass('hidden');
     window.scrollTo(0, 0);
 }
 
@@ -24,7 +25,9 @@ function setLoupePhoto(gridItem) {
                 opacityTransitionTimeout = undefined;
             }
             photo.attr('src', '');
+            $('.loupe .loading').removeClass('hidden');
             photo.one('load', function() {
+                $('.loupe .loading').addClass('hidden');
                 photo.removeClass('transparent');
             });
             photo.attr('src', $(loupeElement).data('src-full'));
