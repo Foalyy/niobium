@@ -19,12 +19,20 @@ EXIF_METADATA_MAPPING = {
 }
 
 
+### App
+app = Flask(__name__)
+app.config.from_file('config.toml', load=toml.load)
+for dir_name in ['PHOTOS_DIR', 'CACHE_DIR']:
+    if not app.config[dir_name].endswith('/'):
+        app.config[dir_name] += '/'
+
+
 ### Database
 
 # Get a reference to the singleton database instance, and create the schema if needed
 def get_db():
     if 'db' not in g:
-        g.db = sqlite3.connect('shashin.sqlite', detect_types=sqlite3.PARSE_DECLTYPES)
+        g.db = sqlite3.connect(app.config['DATABASE_PATH'], detect_types=sqlite3.PARSE_DECLTYPES)
         g.db.row_factory = sqlite3.Row
         try:
             g.db.cursor().execute("SELECT id FROM photo LIMIT 1;")
@@ -39,11 +47,12 @@ def close_db(e=None):
     db = g.pop('db', None)
     if db is not None:
         db.close()
+app.teardown_appcontext(close_db)
 
 
 ### Photos
 
-# Load the photos from the filesystem and sync it with the database
+# Load the photos from the filesystem and sync them with the database
 def load_photos():
     # Get the list of photos currently saved in the database
     def get_photos_from_db(db):
@@ -111,6 +120,7 @@ def load_photos():
 
     return photos_in_db
 
+# Extract useful informations from the given photo and persist them to the database
 def parse_photo_metadata(photo):
     print(f"Parsing metadata for photo {photo['filename']}...")
     row = {
@@ -151,6 +161,7 @@ def parse_photo_metadata(photo):
         cur = g.db.cursor()
         cur.execute("UPDATE photo SET metadata_parsed=1, " + ', '.join([f"{key}=:{key}" for key in row if key != 'uid']) + " WHERE uid=:uid", row)
 
+# Load a photo entry from the database based on the given UID
 def get_photo_from_uid(uid):
     # Get the filename associated to this uid
     with get_db() as db:
@@ -166,6 +177,8 @@ def get_photo_from_uid(uid):
 
     return photo
 
+# Get a Response returning the file for the resized version of a photo based on the given UID, after generating it if needed
+# `prefix` must be either 'thumbnail' or 'large'
 def get_resized_photo(uid, prefix, max_size):
     # Return the resized photo from the cache folder if it exists
     resized_filename = prefix + '_' + uid + '.jpg'
@@ -200,15 +213,6 @@ def get_resized_photo(uid, prefix, max_size):
         photo.save(filename = app.config['CACHE_DIR'] + resized_filename)
         print(f"Resized version ({prefix}) of {filename} generated in the cache directory")
         return send_from_directory(app.config['CACHE_DIR'], resized_filename)
-
-
-### App
-app = Flask(__name__)
-app.config.from_file('config.toml', load=toml.load)
-for dir_name in ['PHOTOS_DIR', 'CACHE_DIR']:
-    if not app.config[dir_name].endswith('/'):
-        app.config[dir_name] += '/'
-app.teardown_appcontext(close_db)
 
 
 

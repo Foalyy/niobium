@@ -1,7 +1,8 @@
-TITLE = "Shashin"
+TITLE = "Niobium"
 INSTAGRAM = "eisenheim_photo"
 PHOTOS_DIR = "photos/"
 CACHE_DIR = "cache/"
+DATABASE_PATH = "niobium.sqlite"
 DEFAULT_ROW_HEIGHT = 23 # vh
 ROW_HEIGHT_STEP = 10 # %
 SHOW_DOWNLOAD_BUTTON = true
