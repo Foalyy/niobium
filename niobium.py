@@ -20,11 +20,23 @@ EXIF_METADATA_MAPPING = {
 
 
 ### App
+
+# Create the main app object
 app = Flask(__name__)
+
+# Read the config file
 app.config.from_file('config.toml', load=toml.load)
+
+# Check directories specified in config
 for dir_name in ['PHOTOS_DIR', 'CACHE_DIR']:
+    # Make sure the path ends with a '/'
     if not app.config[dir_name].endswith('/'):
         app.config[dir_name] += '/'
+
+    # Create the directory if it doesn't exist
+    if not os.path.isdir(app.config[dir_name]):
+        print("Creating empty directory " + app.config[dir_name])
+        os.makedirs(app.config[dir_name])
 
 
 ### Database
