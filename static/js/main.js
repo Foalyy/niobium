@@ -466,6 +466,9 @@ $(function() {
     });
 
     window.onkeydown = function(event) {
+        if (event.ctrlKey || event.shiftKey || event.metaKey) {
+            return;
+        }
         if (event.code == 'Escape') {
             event.preventDefault();
             if (isLoupeOpen()) {
