@@ -14,3 +14,4 @@ LARGE_VIEW_MAX_SIZE = 1920 # px, on any side
 READ_EXIF = true
 SHOW_METADATA = true
 METADATA_VISIBLE_BY_DEFAULT = true
+DOWNLOAD_PREFIX = "niobium_"

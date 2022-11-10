@@ -119,7 +119,7 @@ def load_photos():
             for resized_photo in resized_photos_to_delete:
                 os.remove(app.config['CACHE_DIR'] + resized_photo)
 
-    return photos_in_db
+    return [photo for photo in photos_in_db if not photo['hidden']]
 
 # Extract useful informations from the given photo and persist them to the database
 def parse_photo_metadata(photo):
@@ -243,7 +243,8 @@ def get_large(uid):
 @app.route("/<uid>/download")
 def download_photo(uid):
     photo = get_photo_from_uid(uid)
-    return send_from_directory(app.config['PHOTOS_DIR'], photo['filename'], as_attachment=True)
+    download_name = app.config['DOWNLOAD_PREFIX'] + photo['uid'] + '.jpg'
+    return send_from_directory(app.config['PHOTOS_DIR'], photo['filename'], as_attachment=True, download_name=download_name)
 
 @app.errorhandler(404)
 def page_not_found(error):

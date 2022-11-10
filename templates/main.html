@@ -21,13 +21,11 @@
         <div class="container">
             <div class="grid">
                 {% for photo in photos %}
-                    {% if not photo['hidden'] %}
-                        <div class="grid-item" style="{% if photo['metadata_parsed'] %}background-color: #{{ photo['color'] }}; aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }};{% endif %}" data-uid="{{ photo['uid'] }}" data-index="{{ loop.index }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}" data-loaded="false">
-                            <div class="loading">
-                                <div class="spinner"><i class="fas fa-spinner"></i></div>
-                            </div>
+                    <div class="grid-item" style="{% if photo['metadata_parsed'] %}background-color: #{{ photo['color'] }}; aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }};{% endif %}" data-uid="{{ photo['uid'] }}" data-index="{{ loop.index }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}" data-loaded="false">
+                        <div class="loading">
+                            <div class="spinner"><i class="fas fa-spinner"></i></div>
                         </div>
-                    {% endif %}
+                    </div>
                 {% endfor %}
             </div>
             <div class="grid-actions">
@@ -43,11 +41,11 @@
                     <div class="loupe-prev"><div class="loupe-button"><i class="fa-solid fa-chevron-left"></i></div></div>
                     <div class="loupe-next"><div class="loupe-button"><i class="fa-solid fa-chevron-right"></i></div></div>
                 </div>
-                <div class="loupe-metadata loupe-metadata-top{% if config.METADATA_VISIBLE_BY_DEFAULT == False %} invisible{% endif %}">
+                <div class="loupe-metadata loupe-metadata-top invisible">
                     <div class="loupe-metadata-element hidden"><i class="fa-solid fa-image"></i> <span class="loupe-metadata-title"></span></div>
                 </div>
                 {% if config.SHOW_METADATA %}
-                    <div class="loupe-metadata loupe-metadata-bottom{% if config.METADATA_VISIBLE_BY_DEFAULT == False %} invisible{% endif %}">
+                    <div class="loupe-metadata loupe-metadata-bottom invisible">
                         <div class="loupe-metadata-element hidden"><i class="fa-solid fa-calendar-days"></i> <span class="loupe-metadata-date"></span></div>
                         <div class="loupe-metadata-element hidden"><i class="fa-solid fa-map-marker-alt"></i> <span class="loupe-metadata-place"></span></div>
                         <div class="loupe-metadata-element loupe-metadata-gear hidden"><i class="fa-solid fa-camera-retro"></i> <span class="loupe-metadata-camera"></span> <span class="loupe-metadata-lens"></span></div>
@@ -73,6 +71,7 @@
             let rowHeight = {{ config.DEFAULT_ROW_HEIGHT }};
             let rowHeightStep = {{ config.ROW_HEIGHT_STEP }};
             let slideshowDelay = {{ config.SLIDESHOW_DELAY }};
+            let showMetadata = {{ config.METADATA_VISIBLE_BY_DEFAULT | lower }};
         </script>
         <script src="{{ url_for('static', filename='js/cash.min.js') }}"></script>
         <script src="{{ url_for('static', filename='js/main.js') }}"></script>

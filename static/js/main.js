@@ -29,6 +29,9 @@ function setLoupePhoto(gridItem) {
             photo.one('load', function() {
                 $('.loupe .loading').addClass('hidden');
                 photo.removeClass('transparent');
+                if (showMetadata) {
+                    $('.loupe-metadata').removeClass('invisible');
+                }
             });
             photo.attr('src', $(loupeElement).data('src-large'));
             $('.loupe').css('background-color', $(loupeElement).data('color') + 'FC');
@@ -46,7 +49,7 @@ function setLoupePhoto(gridItem) {
             $('.loupe-action-download').on('click', function(event) {
                 event.preventDefault();
                 event.stopPropagation();
-                window.open($(loupeElement).data('src-download'));
+                downloadCurrentPhoto();
             });
             if ($('.loupe-metadata').length > 0) {
                 const properties = ['title', 'date', 'place', 'camera', 'lens', 'focal-length', 'aperture', 'exposure-time', 'sensitivity'];
@@ -120,6 +123,7 @@ function setLoupePhoto(gridItem) {
             }
         };
         if (!opacityTransitionInProgress) {
+            $('.loupe-metadata').addClass('invisible');
             if (photo.hasClass('transparent')) {
                 loadNext();
             } else {
@@ -186,6 +190,15 @@ function loupeLast() {
     selectPhoto(last);
 }
 
+function toggleShowMetadata() {
+    showMetadata = !showMetadata;
+    if (showMetadata) {
+        $('.loupe-metadata').removeClass('invisible');
+    } else {
+        $('.loupe-metadata').addClass('invisible');
+    }
+}
+
 function startSlideshow() {
     if (!slideshowIntervalTimer) {
         $('.loupe-action-slideshow-start').addClass('hidden');
@@ -207,6 +220,10 @@ function stopSlideshow() {
 
 function isSlideshowStarted() {
     return slideshowIntervalTimer != undefined;
+}
+
+function downloadCurrentPhoto() {
+    window.open($(loupeElement).data('src-download'));
 }
 
 function scrollToPhoto(element) {
@@ -423,7 +440,7 @@ $(function() {
         event.stopPropagation();
     });
     $('.loupe-action-info').on('click', function(event) {
-        $('.loupe-metadata').toggleClass('invisible');
+        toggleShowMetadata();
         event.preventDefault();
         event.stopPropagation();
     });
@@ -456,6 +473,7 @@ $(function() {
             } else {
                 deselect();
             }
+
         } else if (event.code == 'ArrowLeft') {
             event.preventDefault();
             if (isLoupeOpen()) {
@@ -463,6 +481,7 @@ $(function() {
             } else {
                 selectPrev();
             }
+
         } else if (event.code == 'ArrowRight') {
             event.preventDefault();
             if (isLoupeOpen()) {
@@ -470,6 +489,7 @@ $(function() {
             } else {
                 selectNext();
             }
+
         } else if (event.code == 'ArrowDown') {
             event.preventDefault();
             if (isLoupeOpen()) {
@@ -477,6 +497,7 @@ $(function() {
             } else {
                 selectBelow();
             }
+
         } else if (event.code == 'ArrowUp') {
             event.preventDefault();
             if (isLoupeOpen()) {
@@ -484,6 +505,7 @@ $(function() {
             } else {
                 selectAbove();
             }
+
         } else if (event.code == 'Home') {
             event.preventDefault();
             if (isLoupeOpen()) {
@@ -491,6 +513,7 @@ $(function() {
             } else {
                 selectFirst();
             }
+
         } else if (event.code == 'End') {
             event.preventDefault();
             if (isLoupeOpen()) {
@@ -498,6 +521,7 @@ $(function() {
             } else {
                 selectLast();
             }
+
         } else if (event.code == 'Enter' || event.code == 'KeyF') {
             event.preventDefault();
             if (isLoupeOpen()) {
@@ -509,6 +533,17 @@ $(function() {
                 }
                 openLoupe($('.grid-item.selected'));
             }
+
+        } else if (event.code == 'KeyI') {
+            event.preventDefault();
+            toggleShowMetadata();
+
+        } else if (event.code == 'KeyD') {
+            event.preventDefault();
+            if (isLoupeOpen()) {
+                downloadCurrentPhoto();
+            }
+
         } else if (event.code == 'Space') {
             event.preventDefault();
             if (isLoupeOpen()) {
@@ -525,12 +560,18 @@ $(function() {
                 openLoupe($('.grid-item.selected'));
                 startSlideshow();
             }
+
         } else if (event.key == "+") {
             event.preventDefault();
-            gridZoomIn();
+            if (!isLoupeOpen()) {
+                gridZoomIn();
+            }
+
         } else if (event.key == "-") {
             event.preventDefault();
-            gridZoomOut();
+            if (!isLoupeOpen()) {
+                gridZoomOut();
+            }
         }
     };
 });
