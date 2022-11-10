@@ -1,5 +1,6 @@
 import os, random, toml, sqlite3
 from flask import Flask, current_app, g, render_template, abort, send_from_directory, stream_with_context
+from werkzeug.middleware.proxy_fix import ProxyFix
 import werkzeug
 from wand.image import Image
 from pprint import pprint
@@ -37,6 +38,13 @@ for dir_name in ['PHOTOS_DIR', 'CACHE_DIR']:
     if not os.path.isdir(app.config[dir_name]):
         print("Creating empty directory " + app.config[dir_name])
         os.makedirs(app.config[dir_name])
+
+# If running behind a reverse proxy, tell Flask to use the X-Forwarded headers
+# See https://flask.palletsprojects.com/en/2.2.x/deploying/proxy_fix/
+if app.config['BEHIND_REVERSE_PROXY']:
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1
+    )
 
 
 ### Database
