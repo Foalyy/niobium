@@ -20,13 +20,20 @@
     <body>
         <div class="container">
             <div class="grid">
-                {% for photo in photos %}
-                    <div class="grid-item" style="{% if photo['metadata_parsed'] %}background-color: #{{ photo['color'] }}; aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }};{% endif %}" data-uid="{{ photo['uid'] }}" data-index="{{ loop.index }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}" data-loaded="false">
-                        <div class="loading">
-                            <div class="spinner"><i class="fas fa-spinner"></i></div>
+                {% if photos %}
+                    {% for photo in photos %}
+                        <div class="grid-item" style="{% if photo['metadata_parsed'] %}background-color: #{{ photo['color'] }}; aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }};{% endif %}" data-uid="{{ photo['uid'] }}" data-index="{{ loop.index }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}" data-loaded="false">
+                            <div class="loading">
+                                <div class="spinner"><i class="fas fa-spinner"></i></div>
+                            </div>
                         </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="no-photo">
+                        <div class="no-photo-logo"><i class="fa-solid fa-panorama"></i></div>
+                        <div>There isn't any photo to show ! <i class="fa-solid fa-face-sad-tear"></i></div>
                     </div>
-                {% endfor %}
+                {% endif %}
             </div>
             <div class="grid-actions">
                 {% if config.INSTAGRAM %}

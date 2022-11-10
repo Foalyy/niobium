@@ -34,11 +34,6 @@ for dir_name in ['PHOTOS_DIR', 'CACHE_DIR']:
     if not app.config[dir_name].endswith('/'):
         app.config[dir_name] += '/'
 
-    # Create the directory if it doesn't exist
-    if not os.path.isdir(app.config[dir_name]):
-        print("Creating empty directory " + app.config[dir_name])
-        os.makedirs(app.config[dir_name])
-
 # If running behind a reverse proxy, tell Flask to use the X-Forwarded headers
 # See https://flask.palletsprojects.com/en/2.2.x/deploying/proxy_fix/
 if app.config['BEHIND_REVERSE_PROXY']:
@@ -74,6 +69,12 @@ app.teardown_appcontext(close_db)
 
 # Load the photos from the filesystem and sync them with the database
 def load_photos():
+    # Create the directories if they don't exist
+    for dir_name in ['PHOTOS_DIR', 'CACHE_DIR']:
+        if not os.path.isdir(app.config[dir_name]):
+            print("Creating empty directory " + app.config[dir_name])
+            os.makedirs(app.config[dir_name])
+
     # Get the list of photos currently saved in the database
     def get_photos_from_db(db):
         sql = "SELECT * FROM photo ORDER BY " + ', '.join([clause + " " + ("ASC", "DESC")[app.config['REVERSE_SORT_ORDER']] for clause in app.config['SORT_ORDER'].split(',')])
