@@ -4,6 +4,8 @@ CREATE TABLE photo (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     filename VARCHAR(255),
     uid VARCHAR(16),
+    sort_order INTEGER DEFAULT 0,
+    hidden INTEGER DEFAULT 0,
     metadata_parsed INTEGER DEFAULT 0,
     width INTEGER NULL DEFAULT NULL,
     height INTEGER NULL DEFAULT NULL,

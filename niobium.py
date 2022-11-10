@@ -56,7 +56,8 @@ app.teardown_appcontext(close_db)
 def load_photos():
     # Get the list of photos currently saved in the database
     def get_photos_from_db(db):
-        cur.execute("SELECT * FROM photo ORDER BY id DESC")
+        sql = "SELECT * FROM photo ORDER BY " + ', '.join([clause + " " + ("ASC", "DESC")[app.config['REVERSE_SORT_ORDER']] for clause in app.config['SORT_ORDER'].split(',')])
+        cur.execute(sql)
         return [{key: row[key] for key in row.keys()} for row in cur.fetchall()]
 
     # Generate a UID that is guaranteed to not already exist in the provided list
@@ -168,7 +169,7 @@ def get_photo_from_uid(uid):
         cur = g.db.cursor()
         cur.execute("SELECT * FROM photo WHERE uid=:uid", {'uid': uid})
         photo = cur.fetchone()
-    if photo is None:
+    if photo is None or photo['hidden']:
         abort(404)
 
     # Parse metadata if not done already
