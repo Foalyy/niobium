@@ -1,5 +1,5 @@
 :root {
-    --background-color: #101010;
+    --background-color: #050505;
     --padding: 1px;
     --selected-expansion: 1.5vh;
 }
@@ -85,7 +85,7 @@ body {
     display: flex;
     flex-direction: column;
     flex-wrap: wrap;
-    justify-content: flex-start;
+    justify-content: center;
     align-content: flex-start;
     padding: var(--padding);
 }

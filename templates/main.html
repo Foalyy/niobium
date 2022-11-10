@@ -22,7 +22,7 @@
             <div class="grid">
                 {% if photos %}
                     {% for photo in photos %}
-                        <div class="grid-item" style="{% if photo['metadata_parsed'] %}background-color: #{{ photo['color'] }}; aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }};{% endif %}" data-uid="{{ photo['uid'] }}" data-index="{{ loop.index }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}" data-loaded="false">
+                        <div class="grid-item" style="{% if photo['metadata_parsed'] %}background-color: #{{ photo['color'] }}; aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }}; max-width: calc({{ 1.3 * photo['width'] / photo['height'] }} * var(--row-height));{% endif %}" data-uid="{{ photo['uid'] }}" data-index="{{ loop.index }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}" data-loaded="false">
                             <div class="loading">
                                 <div class="spinner"><i class="fas fa-spinner"></i></div>
                             </div>
