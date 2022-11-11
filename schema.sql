@@ -3,7 +3,9 @@ DROP TABLE IF EXISTS photo;
 CREATE TABLE photo (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     filename VARCHAR(255),
+    path VARCHAR(255),
     uid VARCHAR(16),
+    md5 VARCHAR(32),
     sort_order INTEGER DEFAULT 0,
     hidden INTEGER DEFAULT 0,
     metadata_parsed INTEGER DEFAULT 0,

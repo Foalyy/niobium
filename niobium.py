@@ -1,12 +1,13 @@
-import os, random, toml, sqlite3
+import os, sys, shutil, random, toml, sqlite3, hashlib
 from flask import Flask, current_app, g, render_template, abort, send_from_directory, stream_with_context
 from werkzeug.middleware.proxy_fix import ProxyFix
 import werkzeug
 from wand.image import Image
-from pprint import pprint
+from wand.exceptions import CorruptImageError
 
 
 ### Internal constants
+UID_CHARS = "012345678901234567890123456789abcdefghijklmnopqrstuvwxyz" # Intentionally biased toward numbers
 UID_LENGTH = 10
 EXIF_METADATA_MAPPING = {
     'exif:DateTimeDigitized': 'date_taken',
@@ -67,80 +68,202 @@ app.teardown_appcontext(close_db)
 
 ### Photos
 
+# Generate a UID that is guaranteed to not already exist in the provided list
+def generate_uid(existing_uids):
+    while True:
+        # Generate a UID
+        uid = ''.join([random.choice(UID_CHARS) for i in range(UID_LENGTH)])
+
+        # Check that it doesn't already exist before returning it, otherwise loop to generate another one
+        if uid not in existing_uids:
+            return uid
+
+# Calculate and return the MD5 hash of the given file
+def calculate_file_md5(filepath):
+    with open(filepath, 'rb') as file:
+        return hashlib.md5(file.read()).hexdigest()
+
 # Load the photos from the filesystem and sync them with the database
-def load_photos():
-    # Create the directories if they don't exist
+def load_photos(path):
+    # Inner function used to load photos recursively
+    def _load_photos(path, displayed_photos, existing_uids, photos_to_insert, photos_to_remove, paths_found, is_subdir):
+        # Make sure this path is formatted correctly and append it to the list of paths found
+        if not path.endswith('/'):
+            path += '/'
+        paths_found.append(path)
+
+        # List the files inside this path in the photos directory
+        filenames_in_fs = []
+        with os.scandir(app.config['PHOTOS_DIR'][:-1] + path) as directory:
+            for entry in directory:
+                if entry.is_file() and (entry.name.lower().endswith('.jpg') or entry.name.lower().endswith('.jpeg')) and not entry.name.startswith('.'):
+                    filenames_in_fs.append(entry.name)
+        filenames_in_fs.sort()
+
+        with get_db() as db:
+            cur = db.cursor()
+
+            # Get the list of photos saved in the database for this path
+            sql = "SELECT * FROM photo WHERE path=:path ORDER BY " + ', '.join([clause + " " + ("ASC", "DESC")[app.config['REVERSE_SORT_ORDER']] for clause in app.config['SORT_ORDER'].split(',')])
+            cur.execute(sql, {'path': path})
+            photos_in_db = [{key: row[key] for key in row.keys()} for row in cur.fetchall()]
+
+            # Find photos in the filesystem that are not in the database yet
+            filenames_in_db = [photo['filename'] for photo in photos_in_db]
+            photos_to_insert += [{'path': path, 'filename': filename} for filename in filenames_in_fs if filename not in filenames_in_db]
+
+            # Find photos in the database that are not in the filesystem anymore
+            photos_to_remove += [{'uid': photo['uid'], 'path': path, 'filename': photo['filename'], 'md5': photo['md5']} for photo in photos_in_db if photo['filename'] not in filenames_in_fs]
+
+            # Delete old resized photos from cache
+            resized_photos_to_delete = []
+            all_uids_in_path = [photo['uid'] for photo in photos_in_db]
+            suffix = '.jpg'
+            for prefix in ['thumbnail_', 'large_']:
+                try:
+                    resized_photos = [filename for filename in os.listdir(app.config['CACHE_DIR'][:-1] + path) if filename.lower().startswith(prefix) and filename.lower().endswith(suffix)];
+                except FileNotFoundError:
+                    resized_photos = []
+                for resized_photo in resized_photos:
+                    uid = resized_photo[len(prefix): -len(suffix)]
+                    if not uid in all_uids_in_path:
+                        resized_photos_to_delete.append(resized_photo)
+            if resized_photos_to_delete:
+                print(f"Deleting {len(resized_photos_to_delete)} obsolete resized photos in \"{path}\" from cache : {', '.join(resized_photos_to_delete)}")
+                for resized_photo in resized_photos_to_delete:
+                    os.remove(app.config['CACHE_DIR'][:-1] + path + resized_photo)
+
+        # If this is a subdirectory, add these photos only if the SHOW_PHOTOS_FROM_SUBDIRS config is enabled
+        if not is_subdir or app.config['SHOW_PHOTOS_FROM_SUBDIRS']:
+            # Filter out hidden photos
+            displayed_photos += [photo for photo in photos_in_db if not photo['hidden']]
+
+        # If the INDEX_SUBDIRS config is enabled, recursively load photos from subdirectories
+        if app.config['INDEX_SUBDIRS']:
+            # Find the list of subdirectories in the path, in the filesystem
+            subdirs = []
+            with os.scandir(app.config['PHOTOS_DIR'][:-1] + path) as directory:
+                for entry in directory:
+                    if entry.is_dir() and not entry.name.startswith('.'):
+                        subdirs.append(entry.name)
+
+            # Clean obsolete subdirectories (that do not correspond to a subdirectory in the photos folder) from the cache folder
+            subdirs_in_cache = []
+            try:
+                with os.scandir(app.config['CACHE_DIR'][:-1] + path) as directory:
+                    for entry in directory:
+                        if entry.is_dir():
+                            subdirs_in_cache.append(entry.name)
+            except FileNotFoundError:
+                pass
+            for subdir in subdirs_in_cache:
+                if subdir not in subdirs:
+                    try:
+                        shutil.rmtree(app.config['CACHE_DIR'][:-1] + path + subdir)
+                    except Exception as e:
+                        print(f"Error: unable to remove a directory from cache : \"{app.config['CACHE_DIR'][:-1] + path + subdir}\", {e}", file=sys.stderr)
+                        pass
+
+            # Load subdirs recursively
+            if subdirs:
+                subdirs.sort()
+                for subdir in subdirs:
+                    displayed_photos = _load_photos(path + subdir, displayed_photos, existing_uids, photos_to_insert, photos_to_remove, paths_found, True)
+
+        return displayed_photos
+
+    # Create the main directories if they don't exist
     for dir_name in ['PHOTOS_DIR', 'CACHE_DIR']:
         if not os.path.isdir(app.config[dir_name]):
             print("Creating empty directory " + app.config[dir_name])
             os.makedirs(app.config[dir_name])
 
-    # Get the list of photos currently saved in the database
-    def get_photos_from_db(db):
-        sql = "SELECT * FROM photo ORDER BY " + ', '.join([clause + " " + ("ASC", "DESC")[app.config['REVERSE_SORT_ORDER']] for clause in app.config['SORT_ORDER'].split(',')])
-        cur.execute(sql)
-        return [{key: row[key] for key in row.keys()} for row in cur.fetchall()]
-
-    # Generate a UID that is guaranteed to not already exist in the provided list
-    def generate_uid(existing_uids):
-        # List of available characters (biased toward numbers)
-        chars = "012345678901234567890123456789abcdefghijklmnopqrstuvwxyz"
-
-        while True:
-            # Generate a UID
-            uid = ''.join([random.choice(chars) for i in range(UID_LENGTH)])
-
-            # Check that it doesn't already exist before returning it, otherwise loop to generate another one
-            if uid not in existing_uids:
-                return uid
-
-    # List the files inside the photos directory
-    filenames = sorted([filename for filename in os.listdir(app.config['PHOTOS_DIR']) if filename.lower().endswith('.jpg') or filename.lower().endswith('.jpeg')]);
-
+    # Get all existing UIDs from the database
     with get_db() as db:
-        cur = g.db.cursor()
+        cur = db.cursor()
+        cur.execute("SELECT uid FROM photo")
+        existing_uids = [row['uid'] for row in cur.fetchall()]
 
-        # Get the list of photos saved in the database
-        photos_in_db = get_photos_from_db(db)
+    # Load the photos in this path
+    displayed_photos = []
+    photos_to_insert = []
+    photos_to_remove = []
+    paths_found = []
+    displayed_photos = _load_photos(path, displayed_photos, existing_uids, photos_to_insert, photos_to_remove, paths_found, False)
 
-        # Find photos in the filesystem that are not yet in the database and insert them
-        photos_to_insert = [filename for filename in filenames if filename not in [photo['filename'] for photo in photos_in_db]]
-        if photos_to_insert:
-            rows_to_insert = []
-            existing_uids = [photo['uid'] for photo in photos_in_db]
-            for filename in photos_to_insert:
-                # Generate a new UID for this photo
-                uid = generate_uid(existing_uids)
-                existing_uids.append(uid)
-                rows_to_insert.append({'filename': filename, 'uid': uid})
-            print(f"Inserting {len(rows_to_insert)} photo(s) in the database : {', '.join(photos_to_insert)}")
-            cur.executemany("INSERT INTO photo(filename, uid) VALUES (:filename, :uid)", rows_to_insert)
+    # Get the list of all known subdirs of the current path in the database, check if some have been removed, and if so add their photos to the 'to_remove' list
+    deleted_paths = []
+    with get_db() as db:
+        cur = db.cursor()
+        cur.execute("SELECT path FROM photo WHERE SUBSTR(path, 1, ?)=? GROUP BY path;", (len(path), path))
+        known_paths_in_db = [row['path'] for row in cur.fetchall()]
+    for known_path in known_paths_in_db:
+        if known_path not in paths_found:
+            deleted_paths.append(known_path)
+    if deleted_paths:
+        with get_db() as db:
+            cur = db.cursor()
+            cur.execute("SELECT filename, md5, path, uid FROM photo WHERE path IN (" + ','.join(['?']*len(deleted_paths)) + ");", (deleted_paths))
+            photos_to_remove += [{'uid': row['uid'], 'path': row['path'], 'filename': row['filename'], 'md5': row['md5']} for row in cur.fetchall()]
 
-        # Find photos in the database that are not in the filesystem anymore, and delete them
-        photos_to_remove = [{'uid': photo['uid'], 'filename': photo['filename']} for photo in photos_in_db if photo['filename'] not in filenames]
-        if photos_to_remove:
-            print(f"Removing {len(photos_to_remove)} photo(s) from the database : {', '.join([photo['filename'] for photo in photos_to_remove])}")
-            cur.executemany("DELETE FROM photo WHERE uid=?", [(photo['uid'],) for photo in photos_to_remove])
+    # Calculate the MD5 hashes of the new files
+    for photo in photos_to_insert:
+        photo['md5'] = calculate_file_md5(app.config['PHOTOS_DIR'][:-1] + photo['path'] + photo['filename'])
 
-        # If there were photos inserted or deleted, reload the updated list from the database
-        if photos_to_insert or photos_to_remove:
-            photos_in_db = get_photos_from_db(db)
+    # Detect if some of the insert/remove are actually the same file that has been moved or renamed
+    photos_to_move = []
+    if photos_to_insert and photos_to_remove:
+        for new_photo in photos_to_insert:
+            for old_photo in photos_to_remove:
+                if old_photo['md5'] == new_photo['md5']:
+                    photos_to_move.append({'old': old_photo, 'new': new_photo})
+                    break
+        for moved_photo in photos_to_move:
+            photos_to_insert.remove(moved_photo['new'])
+            photos_to_remove.remove(moved_photo['old'])
 
-        # Delete old resized photos from cache
-        resized_photos_to_delete = []
-        all_uids = [photo['uid'] for photo in photos_in_db]
-        for prefix in ['thumbnail_', 'large_']:
-            resized_photos = [filename for filename in os.listdir(app.config['CACHE_DIR']) if filename.lower().startswith(prefix) and filename.lower().endswith('.jpg')];
-            for resized_photo in resized_photos:
-                uid = resized_photo[len(prefix): -len('.jpg')]
-                if not uid in all_uids:
-                    resized_photos_to_delete.append(resized_photo)
-        if resized_photos_to_delete:
-            print(f"Deleting {len(resized_photos_to_delete)} obsolete resized photos from cache : {', '.join(resized_photos_to_delete)}")
-            for resized_photo in resized_photos_to_delete:
-                os.remove(app.config['CACHE_DIR'] + resized_photo)
+    # Apply detected modifications (photos added, moved, or deleted) to the database
+    if photos_to_insert:
+        rows_to_insert = []
+        keys = ['filename', 'path', 'uid', 'md5', 'width', 'height']
+        for photo in photos_to_insert:
+            # Generate a new UID for this photo
+            photo['uid'] = generate_uid(existing_uids)
+            existing_uids.append(photo['uid'])
 
-    return [photo for photo in photos_in_db if not photo['hidden']]
+            # If enabled, read the dimensions of the new photos right now because this is needed at the .grid-item element level; other metadata will be parsed when each photo is accessed
+            # This is optional because it is expensive when adding a large number of photos at once.
+            # If disabled, the dimensions will be read on a per-photo basis the first time each is displayed. This might be better for performance if multiple workers are used, but usually
+            # results in some GUI artifacts the first time it is shown.
+            if app.config['PRE_PARSE_DIMENSIONS']:
+                print(f"Reading dimensions of photo \"{photo['path'] + photo['filename']}\"...")
+                with Image(filename = app.config['PHOTOS_DIR'][:-1] + photo['path'] + photo['filename']) as image:
+                    photo['width'] = image.width
+                    photo['height'] = image.height
+            else:
+                photo['width'] = None
+                photo['height'] = None
+            
+            rows_to_insert.append({key: photo[key] for key in keys})
+
+        print(f"Inserting {len(rows_to_insert)} photo(s) in the database : " + ', '.join(['"' + photo['path'] + photo['filename'] + '"' for photo in photos_to_insert]))
+        with get_db() as db:
+            db.cursor().executemany(f"INSERT INTO photo({', '.join(keys)}) VALUES ({', '.join([':' + key for key in keys])})", rows_to_insert)
+    if photos_to_remove:
+        print(f"Removing {len(photos_to_remove)} photo(s) from the database : " + ', '.join(['"' + photo['path'] + photo['filename'] + '"' for photo in photos_to_remove]))
+        with get_db() as db:
+            db.cursor().executemany("DELETE FROM photo WHERE uid=?", [(photo['uid'],) for photo in photos_to_remove])
+    if photos_to_move:
+        print(f"Renaming/moving {len(photos_to_move)} photo(s) from the database : " + ', '.join(['"' + photo['old']['path'] + photo['old']['filename'] + '"->"' + photo['new']['path'] + photo['new']['filename'] + '"' for photo in photos_to_move]))
+        with get_db() as db:
+            db.cursor().executemany("UPDATE photo SET filename=:filename, path=:path WHERE uid=:uid", [{'filename': photo['new']['filename'], 'path': photo['new']['path'], 'uid': photo['old']['uid']} for photo in photos_to_move])
+
+    # If there were some modifications to the photos, reload the database after updating it
+    if photos_to_insert or photos_to_remove or photos_to_move:
+        displayed_photos = _load_photos(path, [], existing_uids, [], [], [], False)
+
+    return displayed_photos
+
 
 # Extract useful informations from the given photo and persist them to the database
 def parse_photo_metadata(photo):
@@ -158,36 +281,39 @@ def parse_photo_metadata(photo):
         'exposure_time': '',
         'sensitivity': '',
     }
-    with Image(filename = app.config['PHOTOS_DIR'] + photo['filename']) as image:
-        # Image dimensions
-        row['width'] = image.width
-        row['height'] = image.height
+    try:
+        with Image(filename = app.config['PHOTOS_DIR'] + photo['path'][1:] + photo['filename']) as image:
+            # Image dimensions
+            row['width'] = image.width
+            row['height'] = image.height
 
-        # Compute the photo's average color
-        average_color = [image.mean_channel(channel)[0] / image.quantum_range for channel in ['red', 'green', 'blue']]
-        row['color'] = ''.join(['{:02x}'.format(int(channel_value * 255 / 6)) for channel_value in average_color])
+            # Compute the photo's average color
+            average_color = [image.mean_channel(channel)[0] / image.quantum_range for channel in ['red', 'green', 'blue']]
+            row['color'] = ''.join(['{:02x}'.format(int(channel_value * 255 / 6)) for channel_value in average_color])
 
-        # Parse EXIF metadata
-        if app.config['READ_EXIF']:
-            for exif_key, db_key in EXIF_METADATA_MAPPING.items():
-                if exif_key in image.metadata:
-                    try:
-                        value = image.metadata[exif_key]
-                        if db_key in ['focal_length', 'aperture'] and '/' in value:
-                            value = value.split('/')
-                            value = str(round(float(value[0]) / float(value[1]), len(value[1])))
-                    except Exception as e:
-                        print(e)
-                    row[db_key] = value
-    with get_db() as db:
-        cur = g.db.cursor()
-        cur.execute("UPDATE photo SET metadata_parsed=1, " + ', '.join([f"{key}=:{key}" for key in row if key != 'uid']) + " WHERE uid=:uid", row)
+            # Parse EXIF metadata
+            if app.config['READ_EXIF']:
+                for exif_key, db_key in EXIF_METADATA_MAPPING.items():
+                    if exif_key in image.metadata:
+                        try:
+                            value = image.metadata[exif_key]
+                            if db_key in ['focal_length', 'aperture'] and '/' in value:
+                                value = value.split('/')
+                                value = str(round(float(value[0]) / float(value[1]), len(value[1])))
+                        except Exception as e:
+                            print(e)
+                        row[db_key] = value
+        with get_db() as db:
+            cur = db.cursor()
+            cur.execute("UPDATE photo SET metadata_parsed=1, " + ', '.join([f"{key}=:{key}" for key in row if key != 'uid']) + " WHERE uid=:uid", row)
+    except CorruptImageError as e:
+        print(f"Photo \"{photo['path'][1:] + photo['filename']}\" is corrupted : {e}", file=sys.stderr)
 
 # Load a photo entry from the database based on the given UID
 def get_photo_from_uid(uid):
     # Get the filename associated to this uid
     with get_db() as db:
-        cur = g.db.cursor()
+        cur = db.cursor()
         cur.execute("SELECT * FROM photo WHERE uid=:uid", {'uid': uid})
         photo = cur.fetchone()
     if photo is None or photo['hidden']:
@@ -200,53 +326,70 @@ def get_photo_from_uid(uid):
     return photo
 
 # Get a Response returning the file for the resized version of a photo based on the given UID, after generating it if needed
-# `prefix` must be either 'thumbnail' or 'large'
 def get_resized_photo(uid, prefix, max_size):
+    photo = get_photo_from_uid(uid)
+    path = app.config['CACHE_DIR'][:-1] + photo['path']
+    try:
+        os.makedirs(path)
+    except FileExistsError:
+        pass
+
     # Return the resized photo from the cache folder if it exists
     resized_filename = prefix + '_' + uid + '.jpg'
     try:
-        return send_from_directory(app.config['CACHE_DIR'], resized_filename)
+        return send_from_directory(path, resized_filename)
 
     except werkzeug.exceptions.NotFound as e:
         # This resized version doesn't exist, try to generate it
-
-        # Get the filename associated to this uid
-        with get_db() as db:
-            cur = g.db.cursor()
-            cur.execute("SELECT filename FROM photo WHERE uid=?", (uid,))
-            row = cur.fetchone()
-        if row is None:
-            abort(404)
-        filename = row['filename']
-
-        # Resize the image and save it to the cache directory
-        photo = Image(filename = app.config['PHOTOS_DIR'] + filename)
-        max_size = max_size
-        if photo.width > max_size or photo.height > max_size:
-            # Find the best ratio to make the image fit into the max dimension
-            resized_width = max_size
-            resize_ratio = photo.width / max_size
-            resized_height = photo.height / resize_ratio
-            if resized_height > max_size:
-                resize_ratio = photo.height / max_size
-                resized_height = max_size
-                resized_width = photo.width / resize_ratio
-            photo.resize(round(resized_width), round(resized_height))
-        photo.save(filename = app.config['CACHE_DIR'] + resized_filename)
-        print(f"Resized version ({prefix}) of {filename} generated in the cache directory")
-        return send_from_directory(app.config['CACHE_DIR'], resized_filename)
+        try:
+            image = Image(filename = app.config['PHOTOS_DIR'][:-1] + photo['path'] + photo['filename'])
+            max_size = max_size
+            if image.width > max_size or image.height > max_size:
+                # Find the best ratio to make the image fit into the max dimension
+                resized_width = max_size
+                resize_ratio = image.width / max_size
+                resized_height = image.height / resize_ratio
+                if resized_height > max_size:
+                    resize_ratio = image.height / max_size
+                    resized_height = max_size
+                    resized_width = image.width / resize_ratio
+                image.resize(round(resized_width), round(resized_height))
+            image.save(filename = path + resized_filename)
+            print(f"Resized version ({prefix}) of \"{photo['path'][1:] + photo['filename']}\" generated in the cache directory")
+        except CorruptImageError as e:
+            print(f"Photo \"{photo['path'][1:] + photo['filename']}\" is corrupted : {e}", file=sys.stderr)
+        return send_from_directory(path, resized_filename)
 
 
+### Routes
 
 @app.route("/")
 def get_gallery():
-    photos = load_photos()
-    return render_template('main.html', photos=photos)
+    photos = load_photos('/')
+    return render_template('main.html', photos=photos, path='')
+
+@app.route("/<path:path>/")
+def get_gallery_subdir(path):
+    if not app.config['INDEX_SUBDIRS']:
+        abort(404)
+
+    # Prevent path traversal attacks
+    if not os.path.commonprefix([app.config['PHOTOS_DIR'], app.config['PHOTOS_DIR'] + path]):
+        abort(404)
+    
+    # Make sure this directory exists in the filsystem
+    elif not os.path.isdir(app.config['PHOTOS_DIR'] + path):
+        abort(404)
+
+    else:
+        # Load the photos from this path
+        photos = load_photos('/' + path)
+        return render_template('main.html', photos=photos, path=path)
 
 @app.route("/<uid>")
 def get_photo(uid):
     photo = get_photo_from_uid(uid)
-    return send_from_directory(app.config['PHOTOS_DIR'], photo['filename'])
+    return send_from_directory(app.config['PHOTOS_DIR'] + photo['path'][1:], photo['filename'])
 
 @app.route("/<uid>/grid-item")
 def get_grid_item(uid):
@@ -265,7 +408,7 @@ def get_large(uid):
 def download_photo(uid):
     photo = get_photo_from_uid(uid)
     download_name = app.config['DOWNLOAD_PREFIX'] + photo['uid'] + '.jpg'
-    return send_from_directory(app.config['PHOTOS_DIR'], photo['filename'], as_attachment=True, download_name=download_name)
+    return send_from_directory(app.config['PHOTOS_DIR'] + photo['path'][1:], photo['filename'], as_attachment=True, download_name=download_name)
 
 @app.errorhandler(404)
 def page_not_found(error):

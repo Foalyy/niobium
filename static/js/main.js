@@ -377,6 +377,9 @@ function loadPhoto(gridItem, callback) {
                     $(image).on('mouseenter', function(event) {
                         selectPhoto($(event.target).parents('.grid-item'));
                     });
+                    $(image).on('mouseleave', function(event) {
+                        $(event.target).parents('.grid-item').removeClass('selected');
+                    });
                     $(image).attr('src', $(image).data('src-thumbnail'));
                     $(gridItem).data('loaded', true);
                 }
@@ -466,7 +469,7 @@ $(function() {
     });
 
     window.onkeydown = function(event) {
-        if (event.ctrlKey || event.shiftKey || event.metaKey) {
+        if (event.ctrlKey || event.shiftKey || event.metaKey || event.altKey) {
             return;
         }
         if (event.code == 'Escape') {

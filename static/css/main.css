@@ -109,6 +109,7 @@ body {
 .grid .grid-item {
     max-width: 100%;
     width: 100%;
+    min-width: 30px;
     flex-grow: 1;
     position: relative;
     border: var(--padding) solid var(--background-color);
