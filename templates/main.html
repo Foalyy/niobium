@@ -10,7 +10,7 @@
             @media (min-width: 576px) {
                 {% for photo in photos %}
                     .grid-item[data-uid="{{ photo['uid'] }}"] {
-                        max-width: calc({{ 1.3 * photo['width'] / photo['height'] }} * var(--row-height));
+                        max-width: calc({{ config.MAX_ZOOM * photo['width'] / photo['height'] }} * var(--row-height));
                     }
                 {% endfor %}
             }

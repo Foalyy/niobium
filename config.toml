@@ -6,6 +6,7 @@ DATABASE_PATH = "niobium.sqlite"
 SORT_ORDER = "date_taken,sort_order,filename"
 REVERSE_SORT_ORDER = true
 DEFAULT_ROW_HEIGHT = 23 # vh
+MAX_ZOOM = 2
 ROW_HEIGHT_STEP = 10 # %
 SHOW_DOWNLOAD_BUTTON = true
 SLIDESHOW_DELAY = 5000 # ms
