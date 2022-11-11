@@ -10,6 +10,10 @@
     padding: 0;
 }
 
+a:visited {
+    color: inherit;
+}
+
 html:focus-within {
   scroll-behavior: smooth;
 }
@@ -59,7 +63,7 @@ body {
     }
 }
 
-.no-photo {
+.background {
     position: absolute;
     top: 0;
     left: 0;
@@ -74,11 +78,16 @@ body {
     font-size: 120%;
 }
 
-.no-photo-logo {
+.background-logo {
     position: absolute;
     font-size: 300px;
-    color: #A0A0A005;
+    color: #A0A0A010;
     margin-bottom: 2rem;
+    z-index: -10;
+}
+
+.home-link-404 {
+    margin-top: 1em;
 }
 
 .grid {
@@ -86,7 +95,9 @@ body {
     flex-direction: column;
     flex-wrap: wrap;
     justify-content: center;
-    align-content: flex-start;
+    align-content: center;
+    align-items: center;
+    min-height: 100vh;
     padding: var(--padding);
 }
 

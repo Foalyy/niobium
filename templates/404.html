@@ -1,11 +1,9 @@
-<!doctype html>
-<html lang="en">
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>{{ config.TITLE }}</title>
-    </head>
-    <body>
-        <p>This photo or path doesn't exist.</p>
-    </body>
-</html>
+{% extends "layout.html" %}
+
+{% block body %}
+    <div class="background">
+        <div class="background-logo"><i class="fa-solid fa-panorama"></i></div>
+        <div><i class="fa-solid fa-file-circle-question"></i> This page or photo doesn't exist !</div>
+        <div class="home-link-404"><a href="{{ url_for('get_gallery') }}">Back to home</a></div>
+    </div>
+{% endblock %}
