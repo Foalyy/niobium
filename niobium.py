@@ -326,7 +326,7 @@ def get_photo_from_uid(uid):
     return photo
 
 # Get a Response returning the file for the resized version of a photo based on the given UID, after generating it if needed
-def get_resized_photo(uid, prefix, max_size):
+def get_resized_photo(uid, prefix, max_size, quality):
     photo = get_photo_from_uid(uid)
     path = app.config['CACHE_DIR'][:-1] + photo['path']
     try:
@@ -354,6 +354,7 @@ def get_resized_photo(uid, prefix, max_size):
                     resized_height = max_size
                     resized_width = image.width / resize_ratio
                 image.resize(round(resized_width), round(resized_height))
+            image.compression_quality = quality
             image.save(filename = path + resized_filename)
             print(f"Resized version ({prefix}) of \"{photo['path'][1:] + photo['filename']}\" generated in the cache directory")
         except CorruptImageError as e:
@@ -398,11 +399,11 @@ def get_grid_item(uid):
 
 @app.route("/<uid>/thumbnail")
 def get_thumbnail(uid):
-    return get_resized_photo(uid, prefix='thumbnail', max_size=app.config['THUMBNAIL_MAX_SIZE'])
+    return get_resized_photo(uid, prefix='thumbnail', max_size=app.config['THUMBNAIL_MAX_SIZE'], quality=app.config['THUMBNAIL_QUALITY'])
 
 @app.route("/<uid>/large")
 def get_large(uid):
-    return get_resized_photo(uid, prefix='large', max_size=app.config['LARGE_VIEW_MAX_SIZE'])
+    return get_resized_photo(uid, prefix='large', max_size=app.config['LARGE_VIEW_MAX_SIZE'], quality=app.config['LARGE_VIEW_QUALITY'])
 
 @app.route("/<uid>/download")
 def download_photo(uid):
