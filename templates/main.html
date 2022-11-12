@@ -1,6 +1,6 @@
 {% extends "layout.html" %}
 
-{% block title %}{% if path %}{{ path }} - {% endif %}{% endblock %}
+{% block title %}{% if not nav.is_root %}{% for dir in nav.path_split %}{{ dir }} / {% endfor %} - {% endif %}{% endblock %}
 
 {% block head %}
     <style>
@@ -23,8 +23,8 @@
 {% endblock %}
 
 {% block body %}
-    {% if photos %}
-        <div class="container">
+    <div class="container">
+        {% if photos %}
             <div class="grid">
                 {% for photo in photos %}
                     <div class="grid-item" style="{% if photo['width'] and photo['height'] %}aspect-ratio: {{ photo['width'] }}/{{ photo['height'] }};{% endif %} {% if photo['metadata_parsed'] %}background-color: #{{ photo['color'] }};{% endif %}" data-uid="{{ photo['uid'] }}" data-index="{{ loop.index }}" data-load-url="{{ url_for('get_grid_item', uid=photo['uid']) }}" data-loaded="false">
@@ -34,36 +34,88 @@
                     </div>
                 {% endfor %}
             </div>
-            <div class="grid-actions">
+            <div class="grid-actions grid-actions-topright">
                 {% if config.INSTAGRAM %}
-                    <div class="grid-button grid-action-instagram" title="Instagram"><a href="https://www.instagram.com/{{ config.INSTAGRAM }}/" target="_blank"><i class="fa-brands fa-instagram"></i></a></div>
+                    <div class="grid-button grid-action-instagram" title="Instagram"><a href="https://www.instagram.com/{{ config.INSTAGRAM }}/" target="_blank"><i class="fa-brands fa-instagram fa-fw"></i></a></div>
                 {% endif %}
-                <div class="grid-button grid-action-zoom-out" title="Zoom out"><i class="fa-solid fa-magnifying-glass-minus"></i></div>
-                <div class="grid-button grid-action-zoom-in" title="Zoom in"><i class="fa-solid fa-magnifying-glass-plus"></i></div>
+                <div class="grid-button grid-action-zoom-out" title="Zoom out"><i class="fa-solid fa-magnifying-glass-minus fa-fw"></i></div>
+                <div class="grid-button grid-action-zoom-in" title="Zoom in"><i class="fa-solid fa-magnifying-glass-plus fa-fw"></i></div>
             </div>
+        {% else %}
+            <div class="background">
+                <div class="background-logo"><i class="fa-solid fa-panorama"></i></div>
+                <div>This photo folder is empty</div>
+            </div>
+        {% endif %}
+        <div class="grid-actions grid-actions-topleft">
+            {% if config.SHOW_NAVIGATION_PANEL %}
+                {% if not nav.is_root %}
+                    <div class="grid-button grid-action-navigate-up" title="Navigate to the parent directory"><a href="{{ url_for('get_gallery_subdir', path=parent_dir_path) }}"><i class="fa-solid fa-circle-chevron-left fa-fw"></i></a></div>
+                {% endif %}
+                <div class="grid-button grid-action-open-navigation-panel" title="Open the navigation panel"><i class="fa-solid fa-folder-tree fa-fw"></i></div>
+            {% endif %}
+        </div>
+        {% if config.SHOW_NAVIGATION_PANEL %}
+            <div class="navigation-panel-container invisible">
+                <div class="navigation-panel">
+                    <div class="navigation-panel-close"><i class="fa-solid fa-xmark fa-fw"></i></div>
+                    <div class="navigation-panel-content">
+                        {% if config.TITLE %}<div class="navigation-panel-title">{{ config.TITLE }}</div>{% endif %}
+                        <div class="navigation-panel-current-path">
+                            {% if nav.path_split %}
+                                {% set ns = namespace(current_path='') %}
+                                {% for dir in nav.path_split %}
+                                    {% if loop.index0 == 0 %}
+                                        <div class="navigation-panel-current-path-separator navigation-panel-current-path-separator-first"><a href="{{ url_for('get_gallery_subdir', path='/') }}">/</a></div>
+                                    {% else %}
+                                        <div class="navigation-panel-current-path-separator">/</div>
+                                    {% endif %}
+                                    {% set ns.current_path = ns.current_path + '/' + dir %}
+                                    <div class="navigation-panel-current-path-element"><a href="{{ url_for('get_gallery_subdir', path=ns.current_path) }}">{{ dir }}</a></div>
+                                {% endfor %}
+                            {% else %}
+                                <div class="navigation-panel-current-path-separator navigation-panel-current-path-separator-first"><a href="{{ url_for('get_gallery_subdir', path='/') }}">/</a></div>
+                            {% endif %}
+                        </div>
+                        <ul class="navigation-panel-subdirs">
+                            {% if not nav.is_root %}
+                                <li class="navigation-panel-subdir-parent"><a href="{{ url_for('get_gallery_subdir', path=nav.path_parent) }}"><i class="fa-solid fa-circle-chevron-left fa-fw"></i> {% if nav.path_split[-2] %}{{ nav.path_split[-2] }}{% else %}/{% endif %}</a></li>
+                            {% endif %}
+                            <li class="navigation-panel-subdir-current"><a href="{{ url_for('get_gallery_subdir', path=nav.path_current) }}"><i class="fa-solid fa-folder-open fa-fw"></i> {% if nav.path_split[-1] %}{{ nav.path_split[-1] }}{% else %}/{% endif %}</a></li>
+                            {% for subdir in nav.subdirs %}
+                                <li class="navigation-panel-subdir"><a href="{{ url_for('get_gallery_subdir', path=nav.path_current+subdir) }}"><i class="fa-solid fa-folder fa-fw"></i> {{ subdir }}</a></li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+                <div class="navigation-panel-background">
+                </div>
+            </div>
+        {% endif %}
+        {% if config.SHOW_NAVIGATION_PANEL %}
             <div class="loupe">
                 <div class="loupe-photo">
                     <img src="" class="photo-large transparent">
-                    <div class="loupe-prev"><div class="loupe-button"><i class="fa-solid fa-chevron-left"></i></div></div>
-                    <div class="loupe-next"><div class="loupe-button"><i class="fa-solid fa-chevron-right"></i></div></div>
+                    <div class="loupe-prev"><div class="loupe-button"><i class="fa-solid fa-chevron-left fa-fw"></i></div></div>
+                    <div class="loupe-next"><div class="loupe-button"><i class="fa-solid fa-chevron-right fa-fw"></i></div></div>
                 </div>
                 <div class="loupe-metadata loupe-metadata-top invisible">
-                    <div class="loupe-metadata-element hidden"><i class="fa-solid fa-image"></i> <span class="loupe-metadata-title"></span></div>
+                    <div class="loupe-metadata-element hidden"><i class="fa-solid fa-image"></i> <span class="loupe-metadata-title fa-fw"></span></div>
                 </div>
                 {% if config.SHOW_METADATA %}
                     <div class="loupe-metadata loupe-metadata-bottom invisible">
-                        <div class="loupe-metadata-element hidden"><i class="fa-solid fa-calendar-days"></i> <span class="loupe-metadata-date"></span></div>
-                        <div class="loupe-metadata-element hidden"><i class="fa-solid fa-map-marker-alt"></i> <span class="loupe-metadata-place"></span></div>
-                        <div class="loupe-metadata-element loupe-metadata-gear hidden"><i class="fa-solid fa-camera-retro"></i> <span class="loupe-metadata-camera"></span> <span class="loupe-metadata-lens"></span></div>
-                        <div class="loupe-metadata-element loupe-metadata-settings hidden"><i class="fa-solid fa-sliders"></i> <span class="loupe-metadata-focal-length"></span> <span class="loupe-metadata-aperture"></span> <span class="loupe-metadata-exposure-time"></span> <span class="loupe-metadata-sensitivity"></span></div>
+                        <div class="loupe-metadata-element hidden"><i class="fa-solid fa-calendar-days fa-fw"></i> <span class="loupe-metadata-date"></span></div>
+                        <div class="loupe-metadata-element hidden"><i class="fa-solid fa-map-marker-alt fa-fw"></i> <span class="loupe-metadata-place"></span></div>
+                        <div class="loupe-metadata-element loupe-metadata-gear hidden"><i class="fa-solid fa-camera-retro fa-fw"></i> <span class="loupe-metadata-camera"></span> <span class="loupe-metadata-lens"></span></div>
+                        <div class="loupe-metadata-element loupe-metadata-settings hidden"><i class="fa-solid fa-sliders fa-fw"></i> <span class="loupe-metadata-focal-length"></span> <span class="loupe-metadata-aperture"></span> <span class="loupe-metadata-exposure-time"></span> <span class="loupe-metadata-sensitivity"></span></div>
                     </div>
                 {% endif %}
                 <div class="loupe-actions">
-                    <div class="loupe-button loupe-action-info" title="Toggle metadata display"><i class="fa-solid fa-info-circle"></i></div>
-                    <div class="loupe-button loupe-action-slideshow-start" title="Start slideshow"><i class="fa-solid fa-play"></i></div>
-                    <div class="loupe-button loupe-action-slideshow-stop hidden" title="Pause slideshow"><i class="fa-solid fa-pause"></i></div>
+                    <div class="loupe-button loupe-action-info" title="Toggle metadata display"><i class="fa-solid fa-info-circle fa-fw"></i></div>
+                    <div class="loupe-button loupe-action-slideshow-start" title="Start slideshow"><i class="fa-solid fa-play fa-fw"></i></div>
+                    <div class="loupe-button loupe-action-slideshow-stop hidden" title="Pause slideshow"><i class="fa-solid fa-pause fa-fw"></i></div>
                     {% if config.SHOW_DOWNLOAD_BUTTON %}
-                        <div class="loupe-button loupe-action-download" title="Download this photo in original resolution"><i class="fa-solid fa-download"></i></div>
+                        <div class="loupe-button loupe-action-download" title="Download this photo in original resolution"><i class="fa-solid fa-download fa-fw"></i></div>
                     {% endif %}
                 </div>
                 <div class="loupe-photo-index"><span></span></div>
@@ -71,13 +123,8 @@
                     <div class="spinner"><i class="fas fa-spinner"></i></div>
                 </div>
             </div>
-        </div>
-    {% else %}
-        <div class="background">
-            <div class="background-logo"><i class="fa-solid fa-panorama"></i></div>
-            <div>This photo folder is empty</div>
-        </div>
-    {% endif %}
+        {% endif %}
+    </div>
 
     <script>
         let rowHeight = {{ config.DEFAULT_ROW_HEIGHT }};

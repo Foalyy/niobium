@@ -404,6 +404,17 @@ function gridZoomOut() {
     document.documentElement.style.setProperty('--row-height', rowHeight + 'vh');
 }
 
+function openNavigationPanel() {
+    $('.navigation-panel-container').removeClass('invisible');
+    window.location.hash = 'nav';
+}
+
+function closeNavigationPanel() {
+    $('.navigation-panel-container').addClass('invisible');
+    window.location.hash = '';
+}
+
+
 $(function() {
     let observer = new IntersectionObserver(function(elements) {
         $(elements).each(function() {
@@ -419,11 +430,15 @@ $(function() {
     });
 
     if (window.location.hash) {
-        let uid = window.location.hash.substr(1);
-        let gridItem = $('[data-uid="' + uid + '"');
-        if (gridItem.length > 0) {
-            selectPhoto(gridItem);
-            openLoupe(gridItem);
+        if (window.location.hash == '#nav') {
+            openNavigationPanel();
+        } else {
+            let uid = window.location.hash.substr(1);
+            let gridItem = $('[data-uid="' + uid + '"');
+            if (gridItem.length > 0) {
+                selectPhoto(gridItem);
+                openLoupe(gridItem);
+            }
         }
     }
 
@@ -454,6 +469,21 @@ $(function() {
     });
     $('.loupe-action-slideshow-stop').on('click', function(event) {
         stopSlideshow();
+        event.preventDefault();
+        event.stopPropagation();
+    });
+    $('.grid-action-open-navigation-panel').on('click', function(event) {
+        openNavigationPanel();
+        event.preventDefault();
+        event.stopPropagation();
+    });
+    $('.navigation-panel-close').on('click', function(event) {
+        closeNavigationPanel();
+        event.preventDefault();
+        event.stopPropagation();
+    });
+    $('.navigation-panel-background').on('click', function(event) {
+        closeNavigationPanel();
         event.preventDefault();
         event.stopPropagation();
     });

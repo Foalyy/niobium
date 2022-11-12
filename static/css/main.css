@@ -2,6 +2,8 @@
     --background-color: #050505;
     --padding: 1px;
     --selected-expansion: 1.5vh;
+    --navigation-panel-background-color: #0F1221F5;
+    --navigation-panel-highlight-color: #5F8FFF;
 }
 
 *, *::before, *::after {
@@ -10,8 +12,9 @@
     padding: 0;
 }
 
-a:visited {
+a:link, a:visited {
     color: inherit;
+    text-decoration: none;
 }
 
 html:focus-within {
@@ -23,7 +26,7 @@ body {
     min-height: 100vh;
     background-color: var(--background-color);
     overflow-x: hidden;
-    font-family: 'Open Sans';
+    font-family: 'Open Sans', sans-serif;
 }
 
 .hidden {
@@ -83,7 +86,7 @@ body {
     font-size: 300px;
     color: #A0A0A010;
     margin-bottom: 2rem;
-    z-index: -10;
+    z-index: -100;
 }
 
 .home-link-404 {
@@ -131,6 +134,167 @@ body {
     opacity: 0;
 }
 
+.navigation-panel-container {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 80;
+}
+
+.navigation-panel-container.invisible {
+    right: auto;
+    width: 0;
+}
+
+.navigation-panel-content {
+    display: flex;
+    flex-direction: column;
+    max-height: 100%;
+}
+
+.navigation-panel-background {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: 100%;
+    cursor: w-resize;
+}
+
+.navigation-panel-container.invisible .navigation-panel-background {
+    width: 0;
+}
+
+.navigation-panel {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    background-color: var(--navigation-panel-background-color);
+    color: white;
+    padding: 1.5rem;
+    transition: left 0.3s ease, box-shadow 0.3s ease;
+    z-index: 81;
+}
+
+.navigation-panel-container.invisible .navigation-panel {
+    left: -100vw;
+}
+
+.navigation-panel-close {
+    position: absolute;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 1rem;
+    font-size: 150%;
+    color: #A0A0A0;
+    cursor: pointer;
+    text-align: center;
+    background-color: var(--navigation-panel-background-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.navigation-panel-close:hover {
+    color: var(--navigation-panel-highlight-color);
+    background-color: #000000FF;
+}
+
+.navigation-panel-container.invisible .navigation-panel-close {
+    right: 0;
+}
+
+.navigation-panel-title {
+    margin-bottom: 1.2rem;
+    font-size: 150%;
+    text-align: center;
+}
+
+.navigation-panel-current-path {
+    margin-bottom: 0.5rem;
+    min-height: 2em;
+    border-radius: 1em;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.3em;
+    padding: 0.3em 0.8em;
+    background-color: #101010;
+}
+
+.navigation-panel-current-path-separator {
+    margin-left: 0.2rem;
+    margin-right: 0.2rem;
+    color: #A0A0A0;
+}
+
+.navigation-panel-current-path-separator-first {
+    margin-left: 0;
+}
+
+.navigation-panel-current-path-separator-first,
+.navigation-panel-current-path-element a {
+    position: relative;
+    top: 0;
+    color: #B0B0B0;
+    font-weight: bold;
+    transition: color 0.2s ease, top 0.2s ease;
+}
+
+.navigation-panel-current-path-separator-first a:hover,
+.navigation-panel-current-path-element a:hover {
+    top: -0.2em;
+    color: var(--navigation-panel-highlight-color);
+}
+
+.navigation-panel-subdirs {
+    list-style: none;
+    margin-top: 1rem;
+    margin-left: 1rem;
+    flex-grow: 1;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.navigation-panel-subdirs .fa-solid {
+    padding-right: 0.5rem;
+}
+
+.navigation-panel-subdir-current {
+    margin-left: 1rem;
+}
+
+.navigation-panel-subdir {
+    margin-left: 2rem;
+}
+
+.navigation-panel-subdir-parent a,
+.navigation-panel-subdir-current a,
+.navigation-panel-subdir a {
+    padding-left: 0;
+    padding-top: 0.5em;
+    padding-bottom: 0.5em;
+    display: block;
+    color: #B0B0B0;
+    font-weight: bold;
+    transition: color 0.2s ease, padding-left 0.2s ease;
+}
+
+.navigation-panel-subdir-parent a:hover,
+.navigation-panel-subdir-current a:hover,
+.navigation-panel-subdir a:hover {
+    padding-left: 0.5em;
+    color: var(--navigation-panel-highlight-color);
+}
+
 .loupe {
     position: absolute;
     width: 100vw;
@@ -141,7 +305,7 @@ body {
     display: none;
     cursor: zoom-out;
     opacity: 1;
-    z-index: 20;
+    z-index: 100;
     overflow: hidden;
     transition: opacity 1s ease;
     transition: background-color 0.5s ease;
@@ -223,7 +387,7 @@ body {
     border-radius: 1rem;
     color: #A0A0A0;
     opacity: 0.5;
-    transition: opacity 0.5s ease;
+    transition: opacity 0.3s ease, color 0.3s ease;
 }
 
 .grid-action-zoom-in,
@@ -234,18 +398,21 @@ body {
 .grid-button:hover,
 .loupe-button:hover {
     opacity: 1;
+    color: #FFFFFF;
 }
 
 .grid-button,
 .loupe-button {
     width: 2rem;
     cursor: pointer;
-    z-index: 15;
 }
 
-.grid-button a,
-.loupe-button a {
-    color: #A0A0A0;
+.grid-button {
+    z-index: 50;
+}
+
+.loupe-button {
+    z-index: 150;
 }
 
 .loupe-prev:hover .loupe-button,
@@ -306,16 +473,37 @@ body {
 .grid-actions,
 .loupe-actions {
     position: fixed;
-    right: 0;
-    top: 0;
     padding: 2em;
     display: flex;
-    flex-direction: row-reverse;
-    justify-content: flex-end;
     align-items: center;
     align-content: center;
     gap: 1em;
-    z-index: 20;
+}
+
+.grid-actions {
+    z-index: 50;
+}
+
+.grid-actions-topleft {
+    top: 0;
+    left: 0;
+    flex-direction: row;
+    justify-content: flex-start;
+}
+
+.grid-actions-topright {
+    top: 0;
+    right: 0;
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+}
+
+.loupe-actions {
+    right: 0;
+    top: 0;
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+    z-index: 150;
 }
 
 .loupe-photo-index {
@@ -357,6 +545,23 @@ body {
     .grid-action-zoom-in,
     .grid-action-zoom-out {
         display: flex;
+    }
+
+    .navigation-panel {
+        right: auto;
+        width: 30rem;
+        max-width: 100%;
+        box-shadow: 0px 0px 30px #000000;
+    }
+
+    .navigation-panel-container.invisible .navigation-panel {
+        left: -30rem;
+        box-shadow: none;
+    }
+
+    .navigation-panel-close {
+        top: 1.5rem;
+        right: -1rem;
     }
 
     .loupe-prev, .loupe-next {

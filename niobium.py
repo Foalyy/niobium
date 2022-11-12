@@ -68,6 +68,17 @@ app.teardown_appcontext(close_db)
 
 ### Photos
 
+# Return the list of valid subdirectories in the given path in the photos folder
+def list_subdirs(path):
+    if not path.startswith('/'):
+        path = '/' + path
+    subdirs = []
+    with os.scandir(app.config['PHOTOS_DIR'][:-1] + path) as directory:
+        for entry in directory:
+            if entry.is_dir() and not entry.name.startswith('.'):
+                subdirs.append(entry.name)
+    return subdirs
+
 # Generate a UID that is guaranteed to not already exist in the provided list
 def generate_uid(existing_uids):
     while True:
@@ -141,11 +152,7 @@ def load_photos(path):
         # If the INDEX_SUBDIRS config is enabled, recursively load photos from subdirectories
         if app.config['INDEX_SUBDIRS']:
             # Find the list of subdirectories in the path, in the filesystem
-            subdirs = []
-            with os.scandir(app.config['PHOTOS_DIR'][:-1] + path) as directory:
-                for entry in directory:
-                    if entry.is_dir() and not entry.name.startswith('.'):
-                        subdirs.append(entry.name)
+            subdirs = list_subdirs(path)
 
             # Clean obsolete subdirectories (that do not correspond to a subdirectory in the photos folder) from the cache folder
             subdirs_in_cache = []
@@ -192,19 +199,20 @@ def load_photos(path):
     displayed_photos = _load_photos(path, displayed_photos, existing_uids, photos_to_insert, photos_to_remove, paths_found, False)
 
     # Get the list of all known subdirs of the current path in the database, check if some have been removed, and if so add their photos to the 'to_remove' list
-    deleted_paths = []
-    with get_db() as db:
-        cur = db.cursor()
-        cur.execute("SELECT path FROM photo WHERE SUBSTR(path, 1, ?)=? GROUP BY path;", (len(path), path))
-        known_paths_in_db = [row['path'] for row in cur.fetchall()]
-    for known_path in known_paths_in_db:
-        if known_path not in paths_found:
-            deleted_paths.append(known_path)
-    if deleted_paths:
+    if app.config['INDEX_SUBDIRS']:
+        deleted_paths = []
         with get_db() as db:
             cur = db.cursor()
-            cur.execute("SELECT filename, md5, path, uid FROM photo WHERE path IN (" + ','.join(['?']*len(deleted_paths)) + ");", (deleted_paths))
-            photos_to_remove += [{'uid': row['uid'], 'path': row['path'], 'filename': row['filename'], 'md5': row['md5']} for row in cur.fetchall()]
+            cur.execute("SELECT path FROM photo WHERE SUBSTR(path, 1, ?)=? GROUP BY path;", (len(path), path))
+            known_paths_in_db = [row['path'] for row in cur.fetchall()]
+        for known_path in known_paths_in_db:
+            if known_path not in paths_found:
+                deleted_paths.append(known_path)
+        if deleted_paths:
+            with get_db() as db:
+                cur = db.cursor()
+                cur.execute("SELECT filename, md5, path, uid FROM photo WHERE path IN (" + ','.join(['?']*len(deleted_paths)) + ");", (deleted_paths))
+                photos_to_remove += [{'uid': row['uid'], 'path': row['path'], 'filename': row['filename'], 'md5': row['md5']} for row in cur.fetchall()]
 
     # Calculate the MD5 hashes of the new files
     for photo in photos_to_insert:
@@ -366,26 +374,42 @@ def get_resized_photo(uid, prefix, max_size, quality):
 
 @app.route("/")
 def get_gallery():
-    photos = load_photos('/')
-    return render_template('main.html', photos=photos, path='')
+    return get_gallery_subdir('/')
 
 @app.route("/<path:path>/")
 def get_gallery_subdir(path):
-    if not app.config['INDEX_SUBDIRS']:
+    # Make sure path if formatted correctly
+    if not path.startswith('/'):
+        path = '/' + path
+    if not path.endswith('/'):
+        path += '/'
+
+    # Forbid opening subdirectories if INDEX_SUBDIRS is disabned
+    if path != '/' and not app.config['INDEX_SUBDIRS']:
         abort(404)
 
     # Prevent path traversal attacks
     if not os.path.commonprefix([app.config['PHOTOS_DIR'], app.config['PHOTOS_DIR'] + path]):
         abort(404)
     
-    # Make sure this directory exists in the filsystem
-    elif not os.path.isdir(app.config['PHOTOS_DIR'] + path):
+    # Make sure this directory exists in the filesystem and that none of the directories in the path starts with a dot (hidden directories)
+    elif not os.path.isdir(app.config['PHOTOS_DIR'] + path) or True in [p.startswith('.') for p in path.split('/')]:
         abort(404)
 
     else:
         # Load the photos from this path
-        photos = load_photos('/' + path)
-        return render_template('main.html', photos=photos, path=path)
+        photos = load_photos(path)
+
+        # Navigation panel
+        path_split = [d for d in path.split('/') if d]
+        nav = {
+            'is_root': path == '/',
+            'path_current': path,
+            'path_parent': '/' + '/'.join(path_split[:-1]) + '/',
+            'path_split': path_split,
+            'subdirs': sorted(list_subdirs(path)) if app.config['SHOW_NAVIGATION_PANEL'] else [],
+        }
+        return render_template('main.html', photos=photos, nav=nav)
 
 @app.route("/<uid>")
 def get_photo(uid):
