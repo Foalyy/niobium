@@ -39,14 +39,17 @@ body {
 }
 
 .loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.loading-fullsize {
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
 }
 
 .spinner {
@@ -64,6 +67,11 @@ body {
     100% {
         transform: rotate(359deg);
     }
+}
+
+.grid-loading .spinner i {
+    font-size: 30px;
+    color: #F0F0F0F0;
 }
 
 .background {
@@ -93,7 +101,7 @@ body {
     margin-top: 1em;
 }
 
-.grid {
+.grid-content {
     display: flex;
     flex-direction: column;
     flex-wrap: wrap;
@@ -104,12 +112,17 @@ body {
     padding: var(--padding);
 }
 
+.grid-content-loading {
+    width: 100vw;
+    padding: 0.5em;
+}
+
 .show-loupe .grid {
     height: 100vh;
     overflow-x: hidden;
 }
 
-.grid .grid-item {
+.grid-item {
     max-width: 100%;
     width: 100%;
     min-width: 30px;
@@ -118,11 +131,12 @@ body {
     border: var(--padding) solid var(--background-color);
 }
 
-.grid .grid-item .photo {
+.grid-item .photo {
     position: relative;
     top: 0px;
     left: 0px;
     width: 100%;
+    height: 100%;
     object-fit: cover;
     padding: 0;
     cursor: zoom-in;
@@ -130,7 +144,7 @@ body {
     transition: opacity 0.5s ease;
 }
 
-.grid .grid-item .photo.transparent {
+.grid-item .photo.transparent {
     opacity: 0;
 }
 
@@ -311,7 +325,7 @@ body {
     transition: background-color 0.5s ease;
 }
 
-.loupe .loading .spinner i {
+.loupe-loading .spinner i {
     font-size: 30px;
     color: #A0A0A0A0;
 }
@@ -515,20 +529,20 @@ body {
 }
 
 @media (min-width: 576px) {
-    .grid {
+    .grid-content {
         flex-direction: row;
     }
 
-    .grid .grid-item {
+    .grid-item {
         width: auto;
         height: var(--row-height);
     }
 
-    .grid .grid-item .photo {
+    .grid-item .photo {
         height: calc(var(--row-height) - 2 * var(--padding));
     }
 
-    .grid .grid-item.selected .photo {
+    .grid-item.selected .photo {
         padding: 0;
         transition: top, left, width, height, box-shadow;
         transition-duration: 0.2s;
@@ -568,4 +582,12 @@ body {
         align-items: center;
         padding-bottom: 0;
     }
+}
+
+@media (max-width: 576px) {
+
+    .grid-item {
+        max-width: unset !important;
+    }
+
 }

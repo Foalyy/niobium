@@ -3,227 +3,189 @@ let loupeElement = undefined;
 let opacityTransitionInProgress = false;
 let opacityTransitionTimeout = undefined;
 let slideshowIntervalTimer = undefined;
+let loadGridBatchSize = 50;
+let loadingGrid = false;
+let mouseEnterEnabled = true;
 
-function openLoupe(gridItem) {
-    savedScroll = window.pageYOffset;
-    setLoupePhoto(gridItem);
-    $('.container').addClass('show-loupe');
-    $('.loupe .loading').removeClass('hidden');
-    window.scrollTo(0, 0);
-}
+let gridStartIntersectionObserver = new IntersectionObserver(function(elements) {
+    if (elements[0].isIntersecting) {
+        loadGrid(true);
+    }
+}, {
+    threshold: 0.2
+});
 
-function setLoupePhoto(gridItem) {
-    loadPhoto(gridItem, function(gridItem) {
-        window.location.hash = $(gridItem).data('uid');
-        $('.loupe-photo-index').children('span').text($(gridItem).data('index') + " / " + $('.grid-item').last().data('index'));
-        loupeElement = $(gridItem).children('.photo');
-        let photo = $('.loupe .photo-large');
-        let loadNext = function() {
-            opacityTransitionInProgress = false;
-            if (opacityTransitionTimeout) {
-                clearTimeout(opacityTransitionTimeout);
-                opacityTransitionTimeout = undefined;
-            }
-            photo.attr('src', '');
-            $('.loupe .loading').removeClass('hidden');
-            photo.one('load', function() {
-                $('.loupe .loading').addClass('hidden');
-                photo.removeClass('transparent');
-                if (showMetadata) {
-                    $('.loupe-metadata').removeClass('invisible');
-                }
-            });
-            photo.attr('src', $(loupeElement).data('src-large'));
-            $('.loupe').css('background-color', $(loupeElement).data('color') + 'FC');
-            if ($(loupeElement).parent().prev().length > 0) {
-                $('.loupe-prev').removeClass('hidden');
-            } else {
-                $('.loupe-prev').addClass('hidden');
-            }
-            if ($(loupeElement).parent().next().length > 0) {
-                $('.loupe-next').removeClass('hidden');
-            } else {
-                $('.loupe-next').addClass('hidden');
-            }
-            $('.loupe-action-download').off('click');
-            $('.loupe-action-download').on('click', function(event) {
-                event.preventDefault();
-                event.stopPropagation();
-                downloadCurrentPhoto();
-            });
-            if ($('.loupe-metadata').length > 0) {
-                const properties = ['title', 'date', 'place', 'camera', 'lens', 'focal-length', 'aperture', 'exposure-time', 'sensitivity'];
-                let showInfoButton = false;
-                let showGear = false;
-                let showSettings = false;
-                properties.forEach(function(property) {
-                    let infoElement = $('.loupe-metadata-' + property);
-                    infoElement.text('');
-                    let value = $(loupeElement).data(property);
-                    if (typeof(value) == 'string') {
-                        value = value.trim();
-                    }
-                    if (value) {
-                        showInfoButton = true;
-                    }
-                    if (property == 'camera') {
-                        if (value) {
-                            infoElement.text(value);
-                            showGear = true;
+let gridEndIntersectionObserver = new IntersectionObserver(function(elements) {
+    if (elements[0].isIntersecting) {
+        loadGrid();
+    }
+}, {
+    threshold: 0.2
+});
+
+let gridItemIntersectionObserver = new IntersectionObserver(function(elements) {
+    $(elements).each(function() {
+        if (this.isIntersecting) {
+            loadPhoto(this.target);
+        }
+    });
+}, {
+    threshold: 0
+});
+
+function loadGrid(before=false, preselectedUID=undefined, around=false) {
+    if (loadingGrid) {
+        return;
+    }
+    loadingGrid = true;
+
+    let request = new XMLHttpRequest();
+    request.onreadystatechange = function() {
+        if (this.status == 200) {
+            if (this.readyState == 4) {
+                loadingGrid = false;
+                $('.grid-loading').addClass('hidden');
+                let gridContent = $('.grid-content');
+                $(request.responseText.replace(/\n/g, '').trim()).each(function(index, gridItem) {
+                    if (gridItem.nodeName == "DIV") {
+                        let gridItems = gridContent.children();
+                        let inserted = false;
+                        for (i = gridItems.length - 1; i >= 0; i--) {
+                            let loopGridItem = $(gridItems.get(i));
+                            if ($(gridItem).data('index') >= loopGridItem.data('index')) {
+                                if ($(gridItem).data('index') != loopGridItem.data('index')) {
+                                    $(gridItem).insertAfter(loopGridItem);
+                                }
+                                inserted = true;
+                                break;
+                            }
                         }
-                    } else if (property == 'lens') {
-                        if (value) {
-                            infoElement.text(value);
-                            showGear = true;
+                        if (!inserted) {
+                            $(gridItem).prependTo(gridContent);
                         }
-                    } else if (property == 'focal-length') {
-                        if (value) {
-                            infoElement.text(value + "mm");
-                            showSettings = true;
-                        }
-                    } else if (property == 'aperture') {
-                        if (value) {
-                            infoElement.text("f/" + value);
-                            showSettings = true;
-                        }
-                    } else if (property == 'exposure-time') {
-                        if (value) {
-                            infoElement.text(value + "s");
-                            showSettings = true;
-                        }
-                    } else if (property == 'sensitivity') {
-                        if (value) {
-                            infoElement.text("ISO " + value);
-                            showSettings = true;
-                        }
-                    } else {
-                        if (value) {
-                            infoElement.text(value);
-                            infoElement.parent().removeClass('hidden');
-                        } else {
-                            infoElement.parent().addClass('hidden');
-                        }
+                        gridItemIntersectionObserver.observe(gridItem);
                     }
                 });
-                if (showInfoButton) {
-                    $('.loupe-action-info').removeClass('hidden');
+                if (preselectedUID && !around) {
+                    loadGrid(false, preselectedUID, true);
+                    let gridItem = $('[data-uid="' + preselectedUID + '"]');
+                    selectPhoto(gridItem);
+                    openLoupe(gridItem);
                 } else {
-                    $('.loupe-action-info').addClass('hidden');
+                    if (!isLoupeOpen()) {
+                        setTimeout(function() {
+                            connectGridLoaderObservers();
+                        }, 500);
+                    }
                 }
-                if (showGear) {
-                    $('.loupe-metadata-gear').removeClass('hidden');
-                } else {
-                    $('.loupe-metadata-gear').addClass('hidden');
+                scrollToSelectedPhoto();
+                if (window.scrollY < $('.grid-content').offset().top) {
+                    scrollToTop();
                 }
-                if (showSettings) {
-                    $('.loupe-metadata-settings').removeClass('hidden');
-                } else {
-                    $('.loupe-metadata-settings').addClass('hidden');
+            }
+        }
+    };
+    let args = '';
+    if (preselectedUID) {
+        if (!around) {
+            args = '?uid=' + preselectedUID;
+        } else {
+            let start = $('[data-uid="' + preselectedUID + '"').data('index') - loadGridBatchSize/2;
+            if (start < 0) {
+                start = 0;
+            }
+            let count = loadGridBatchSize;
+            args = "?start=" + start + "&count=" + count;
+        }
+    } else {
+        let start = 0;
+        let count = loadGridBatchSize;
+        let gridItems = $('.grid-item');
+        if (before) {
+            start = gridItems.first().data('index') - count;
+            if (start < 0) {
+                count += start;
+                start = 0;
+            }
+        } else {
+            if (gridItems.length > 0) {
+                start = gridItems.last().data('index') + 1;
+            }
+        }
+        args = "?start=" + start + "&count=" + count;
+    }
+    request.open('GET', loadGridURL + args, true);
+    request.send();
+    disconnectGridLoaderObservers();
+}
+
+function connectGridLoaderObservers() {
+    if ($('.grid-item').first().data('index') > 0) {
+        $('.grid-content-loading-start').removeClass('hidden');
+        gridStartIntersectionObserver.observe($('.grid-content-loading-start')[0]);
+    } else {
+        $('.grid-content-loading-start').addClass('hidden');
+    }
+    if ($('.grid-item').last().data('index') < $('.grid-item').last().data('count') - 1) {
+        $('.grid-content-loading-end').removeClass('hidden');
+        gridEndIntersectionObserver.observe($('.grid-content-loading-end')[0]);
+    } else {
+        $('.grid-content-loading-end').addClass('hidden');
+    }
+}
+
+function disconnectGridLoaderObservers() {
+    gridStartIntersectionObserver.disconnect();
+    gridEndIntersectionObserver.disconnect();
+}
+
+function loadPhoto(gridItem, callback) {
+    if (!$(gridItem).data('loaded')) {
+        let request = new XMLHttpRequest();
+        request.onreadystatechange = function() {
+            if (this.status == 200) {
+                if (this.readyState == 4) {
+                    if ($(gridItem).children('img').length > 0) {
+                        return;
+                    }
+                    $(request.responseText.replace(/\n/g, '').trim()).prependTo($(gridItem));
+                    let image = $(gridItem).children('.photo');
+                    $(image).on('load', function() {
+                        $(image).parent().children('.loading').remove()
+                        $(image).removeClass('transparent');
+                        $(image).on('click', function(event) {
+                            let openGridItem = $(this).parents('.grid-item');
+                            selectPhoto(openGridItem);
+                            openLoupe(openGridItem);
+                        });
+                        if (callback != undefined) {
+                            callback(gridItem);
+                        }
+                    });
+                    $(image).on('mouseenter', function(event) {
+                        if (mouseEnterEnabled) {
+                            selectPhoto($(event.target).parents('.grid-item'));
+                        }
+                    });
+                    $(image).on('mouseleave', function(event) {
+                        $(event.target).parents('.grid-item').removeClass('selected');
+                    });
+                    $(image).attr('src', $(image).data('src-thumbnail'));
+                    $(gridItem).data('loaded', true);
                 }
             }
         };
-        if (!opacityTransitionInProgress) {
-            $('.loupe-metadata').addClass('invisible');
-            if (photo.hasClass('transparent')) {
-                loadNext();
-            } else {
-                photo.one('transitionend', function() {
-                    if (event.propertyName == 'opacity' && photo.hasClass('transparent')) {
-                        loadNext();
-                    }
-                });
-                opacityTransitionInProgress = true;
-                if (opacityTransitionTimeout) {
-                    clearTimeout(opacityTransitionTimeout);
-                }
-                opacityTransitionTimeout = setTimeout(function() {
-                    loadNext();
-                }, 800);
-                photo.addClass('transparent');
-            }
-        }
-    });
-}
-
-function closeLoupe() {
-    stopSlideshow();
-    window.location.hash = '';
-    $('.container').removeClass('show-loupe');
-    window.scrollTo(0, savedScroll);
-    let selected = $('.grid-item.selected');
-    if (selected.length > 0) {
-        scrollToPhoto(selected);
-    }
-}
-
-function isLoupeOpen() {
-    return $('.container').hasClass('show-loupe');
-}
-
-function loupePrev() {
-    let prev = $(loupeElement).parent().prev();
-    if (prev.length > 0) {
-        setLoupePhoto(prev);
-        selectPhoto(prev);
-    }
-}
-
-function loupeNext(loop=false) {
-    let next = $(loupeElement).parent().next();
-    if (next.length > 0) {
-        setLoupePhoto(next);
-        selectPhoto(next);
-    } else if (loop) {
-        loupeFirst();
-    }
-}
-
-function loupeFirst() {
-    let first = $(loupeElement).parents('.grid').children().first();
-    setLoupePhoto(first);
-    selectPhoto(first);
-}
-
-function loupeLast() {
-    let last = $(loupeElement).parents('.grid').children().last();
-    setLoupePhoto(last);
-    selectPhoto(last);
-}
-
-function toggleShowMetadata() {
-    showMetadata = !showMetadata;
-    if (showMetadata) {
-        $('.loupe-metadata').removeClass('invisible');
+        request.open('GET', $(gridItem).data('load-url'), true);
+        request.send();
     } else {
-        $('.loupe-metadata').addClass('invisible');
+        if (callback != undefined) {
+            callback(gridItem);
+        }
     }
 }
 
-function startSlideshow() {
-    if (!slideshowIntervalTimer) {
-        $('.loupe-action-slideshow-start').addClass('hidden');
-        $('.loupe-action-slideshow-stop').removeClass('hidden');
-        slideshowIntervalTimer = setInterval(function() {
-            loupeNext(true);
-        }, slideshowDelay);
-    }
-}
-
-function stopSlideshow() {
-    if (slideshowIntervalTimer) {
-        $('.loupe-action-slideshow-start').removeClass('hidden');
-        $('.loupe-action-slideshow-stop').addClass('hidden');
-        clearInterval(slideshowIntervalTimer);
-        slideshowIntervalTimer = undefined;
-    }
-}
-
-function isSlideshowStarted() {
-    return slideshowIntervalTimer != undefined;
-}
-
-function downloadCurrentPhoto() {
-    window.open($(loupeElement).data('src-download'));
+function scrollToTop() {
+    window.scrollTo(0, $('.grid-content').offset().top);
 }
 
 function scrollToPhoto(element) {
@@ -236,6 +198,13 @@ function scrollToPhoto(element) {
         window.scrollBy(0, elementTop - margin - viewportTop);
     } else if (elementBottom + margin > viewportBottom) {
         window.scrollBy(0, elementBottom + margin - viewportBottom);
+    }
+}
+
+function scrollToSelectedPhoto() {
+    let selected = $('.grid-item.selected');
+    if (selected.length > 0) {
+        scrollToPhoto(selected);
     }
 }
 
@@ -355,45 +324,6 @@ function deselect() {
     $('.grid-item.selected').removeClass('selected');
 }
 
-function loadPhoto(gridItem, callback) {
-    if (!$(gridItem).data('loaded')) {
-        let request = new XMLHttpRequest();
-        request.onreadystatechange = function() {
-            if (this.status == 200) {
-                if (this.readyState == 4) {
-                    $(gridItem).html(request.responseText);
-                    let image = $(gridItem).children('.photo');
-                    $(image).on('load', function() {
-                        $(image).removeClass('transparent');
-                        $(image).on('click', function(event) {
-                            let openGridItem = $(this).parents('.grid-item');
-                            selectPhoto(openGridItem);
-                            openLoupe(openGridItem);
-                        });
-                        if (callback != undefined) {
-                            callback(gridItem);
-                        }
-                    });
-                    $(image).on('mouseenter', function(event) {
-                        selectPhoto($(event.target).parents('.grid-item'));
-                    });
-                    $(image).on('mouseleave', function(event) {
-                        $(event.target).parents('.grid-item').removeClass('selected');
-                    });
-                    $(image).attr('src', $(image).data('src-thumbnail'));
-                    $(gridItem).data('loaded', true);
-                }
-            }
-        };
-        request.open('GET', $(gridItem).data('load-url'), true);
-        request.send();
-    } else {
-        if (callback != undefined) {
-            callback(gridItem);
-        }
-    }
-}
-
 function gridZoomIn() {
     rowHeight *= 1 + rowHeightStep / 100.;
     document.documentElement.style.setProperty('--row-height', rowHeight + 'vh');
@@ -414,33 +344,263 @@ function closeNavigationPanel() {
     window.location.hash = '';
 }
 
+function openLoupe(gridItem) {
+    mouseEnterEnabled = false;
+    disconnectGridLoaderObservers();
+    savedScroll = window.pageYOffset;
+    setLoupePhoto(gridItem);
+    $('.container').addClass('show-loupe');
+    $('.loupe-loading').removeClass('hidden');
+    $('.grid-content-loading-start').addClass('hidden');
+    $('.grid-content-loading-end').addClass('hidden');
+    scrollToTop();
+}
+
+function setLoupePhoto(gridItem) {
+    loadPhoto(gridItem, function(gridItem) {
+        window.location.hash = $(gridItem).data('uid');
+        $('.loupe-photo-index').children('span').text(($(gridItem).data('index') + 1) + " / " + $('.grid-item').first().data('count'));
+        loupeElement = $(gridItem).children('.photo');
+        let photo = $('.loupe .photo-large');
+        let loadNext = function() {
+            opacityTransitionInProgress = false;
+            if (opacityTransitionTimeout) {
+                clearTimeout(opacityTransitionTimeout);
+                opacityTransitionTimeout = undefined;
+            }
+            photo.attr('src', '');
+            $('.loupe-loading').removeClass('hidden');
+            photo.one('load', function() {
+                $('.loupe-loading').addClass('hidden');
+                photo.removeClass('transparent');
+                if (showMetadata) {
+                    $('.loupe-metadata').removeClass('invisible');
+                }
+            });
+            photo.attr('src', $(loupeElement).data('src-large'));
+            $('.loupe').css('background-color', $(loupeElement).data('color') + 'FC');
+            if ($(loupeElement).parent().prev().length > 0) {
+                $('.loupe-prev').removeClass('hidden');
+            } else {
+                $('.loupe-prev').addClass('hidden');
+            }
+            if ($(loupeElement).parent().next().length > 0) {
+                $('.loupe-next').removeClass('hidden');
+            } else {
+                $('.loupe-next').addClass('hidden');
+            }
+            $('.loupe-action-download').off('click');
+            $('.loupe-action-download').on('click', function(event) {
+                event.preventDefault();
+                event.stopPropagation();
+                downloadCurrentPhoto();
+            });
+            if ($('.loupe-metadata').length > 0) {
+                const properties = ['title', 'date', 'place', 'camera', 'lens', 'focal-length', 'aperture', 'exposure-time', 'sensitivity'];
+                let showInfoButton = false;
+                let showGear = false;
+                let showSettings = false;
+                properties.forEach(function(property) {
+                    let infoElement = $('.loupe-metadata-' + property);
+                    infoElement.text('');
+                    let value = $(loupeElement).data(property);
+                    if (typeof(value) == 'string') {
+                        value = value.trim();
+                    }
+                    if (value) {
+                        showInfoButton = true;
+                    }
+                    if (property == 'camera') {
+                        if (value) {
+                            infoElement.text(value);
+                            showGear = true;
+                        }
+                    } else if (property == 'lens') {
+                        if (value) {
+                            infoElement.text(value);
+                            showGear = true;
+                        }
+                    } else if (property == 'focal-length') {
+                        if (value) {
+                            infoElement.text(value + "mm");
+                            showSettings = true;
+                        }
+                    } else if (property == 'aperture') {
+                        if (value) {
+                            infoElement.text("f/" + value);
+                            showSettings = true;
+                        }
+                    } else if (property == 'exposure-time') {
+                        if (value) {
+                            infoElement.text(value + "s");
+                            showSettings = true;
+                        }
+                    } else if (property == 'sensitivity') {
+                        if (value) {
+                            infoElement.text("ISO " + value);
+                            showSettings = true;
+                        }
+                    } else {
+                        if (value) {
+                            infoElement.text(value);
+                            infoElement.parent().removeClass('hidden');
+                        } else {
+                            infoElement.parent().addClass('hidden');
+                        }
+                    }
+                });
+                if (showInfoButton) {
+                    $('.loupe-action-info').removeClass('hidden');
+                } else {
+                    $('.loupe-action-info').addClass('hidden');
+                }
+                if (showGear) {
+                    $('.loupe-metadata-gear').removeClass('hidden');
+                } else {
+                    $('.loupe-metadata-gear').addClass('hidden');
+                }
+                if (showSettings) {
+                    $('.loupe-metadata-settings').removeClass('hidden');
+                } else {
+                    $('.loupe-metadata-settings').addClass('hidden');
+                }
+            }
+        };
+        if (!opacityTransitionInProgress) {
+            $('.loupe-metadata').addClass('invisible');
+            if (photo.hasClass('transparent')) {
+                loadNext();
+            } else {
+                photo.one('transitionend', function() {
+                    if (event.propertyName == 'opacity' && photo.hasClass('transparent')) {
+                        loadNext();
+                    }
+                });
+                opacityTransitionInProgress = true;
+                if (opacityTransitionTimeout) {
+                    clearTimeout(opacityTransitionTimeout);
+                }
+                opacityTransitionTimeout = setTimeout(function() {
+                    loadNext();
+                }, 800);
+                photo.addClass('transparent');
+            }
+        }
+    });
+}
+
+function closeLoupe() {
+    let gridItem = $(loupeElement).parent();
+    $(gridItem).addClass('selected');
+    stopSlideshow();
+    window.location.hash = '';
+    $('.container').removeClass('show-loupe');
+    if ($('.grid-item').first().data('index') > 0) {
+        $('.grid-content-loading-start').removeClass('hidden');
+    };
+    if ($('.grid-item').last().data('index') < $('.grid-item').last().data('count') - 1) {
+        $('.grid-content-loading-end').removeClass('hidden');
+    }
+    window.scrollTo(0, savedScroll);
+    setTimeout(function () {
+        scrollToPhoto($(gridItem));
+        connectGridLoaderObservers();
+        mouseEnterEnabled = true;
+    }, 100);
+}
+
+function isLoupeOpen() {
+    return $('.container').hasClass('show-loupe');
+}
+
+function loupePrev() {
+    let prev = $(loupeElement).parent().prev();
+    if (prev.length > 0) {
+        setLoupePhoto(prev);
+        selectPhoto(prev);
+        if (prev.data('index') >= 1 && $('[data-index="' + (prev.data('index') - 1) + '"]').length == 0) {
+            loadGrid(true);
+        }
+    }
+}
+
+function loupeNext(loop=false) {
+    let next = $(loupeElement).parent().next();
+    if (next.length > 0) {
+        setLoupePhoto(next);
+        selectPhoto(next);
+        if (next.data('index') < $(loupeElement).parent().data('count') - 1 && $('[data-index="' + (next.data('index') + 1) + '"]').length == 0) {
+            loadGrid();
+        }
+    } else if (loop) {
+        loupeFirst();
+    }
+}
+
+function loupeFirst() {
+    let first = $(loupeElement).parents('.grid-content').children().first();
+    setLoupePhoto(first);
+    selectPhoto(first);
+}
+
+function loupeLast() {
+    let last = $(loupeElement).parents('.grid-content').children().last();
+    setLoupePhoto(last);
+    selectPhoto(last);
+}
+
+function toggleShowMetadata() {
+    showMetadata = !showMetadata;
+    if (showMetadata) {
+        $('.loupe-metadata').removeClass('invisible');
+    } else {
+        $('.loupe-metadata').addClass('invisible');
+    }
+}
+
+function startSlideshow() {
+    if (!slideshowIntervalTimer) {
+        $('.loupe-action-slideshow-start').addClass('hidden');
+        $('.loupe-action-slideshow-stop').removeClass('hidden');
+        slideshowIntervalTimer = setInterval(function() {
+            loupeNext(true);
+        }, slideshowDelay);
+    }
+}
+
+function stopSlideshow() {
+    if (slideshowIntervalTimer) {
+        $('.loupe-action-slideshow-start').removeClass('hidden');
+        $('.loupe-action-slideshow-stop').addClass('hidden');
+        clearInterval(slideshowIntervalTimer);
+        slideshowIntervalTimer = undefined;
+    }
+}
+
+function isSlideshowStarted() {
+    return slideshowIntervalTimer != undefined;
+}
+
+function downloadCurrentPhoto() {
+    window.open($(loupeElement).data('src-download'));
+}
+
 
 $(function() {
-    let observer = new IntersectionObserver(function(elements) {
-        $(elements).each(function() {
-            if (this.isIntersecting) {
-                loadPhoto(this.target);
-            }
-        });
-    }, {
-        threshold: 0
-    });
-    $('.grid-item').each(function() {
-        observer.observe(this);
-    });
-
+    let preselectedUID = undefined;
     if (window.location.hash) {
         if (window.location.hash == '#nav') {
             openNavigationPanel();
         } else {
-            let uid = window.location.hash.substr(1);
-            let gridItem = $('[data-uid="' + uid + '"');
-            if (gridItem.length > 0) {
-                selectPhoto(gridItem);
-                openLoupe(gridItem);
+            let hashValue = window.location.hash.substr(1);
+            if (hashValue.length == UID_LENGTH) {
+                let allowedChars = UID_CHARS.split('');
+                preselectedUID = hashValue.split('').filter(c => allowedChars.indexOf(c) >= 0).join('');
             }
         }
     }
+
+    loadGrid(false, preselectedUID);
 
     $('.loupe').on('click', function(event) {
         closeLoupe();

@@ -1,5 +1,5 @@
 import os, sys, shutil, random, toml, sqlite3, hashlib
-from flask import Flask, current_app, g, render_template, abort, send_from_directory, stream_with_context
+from flask import Flask, request, current_app, g, render_template, abort, send_from_directory, stream_with_context
 from werkzeug.middleware.proxy_fix import ProxyFix
 import werkzeug
 from wand.image import Image
@@ -8,7 +8,6 @@ from wand.exceptions import CorruptImageError
 
 ### Internal constants
 UID_CHARS = "012345678901234567890123456789abcdefghijklmnopqrstuvwxyz" # Intentionally biased toward numbers
-UID_LENGTH = 10
 EXIF_METADATA_MAPPING = {
     'exif:DateTimeDigitized': 'date_taken',
     'exif:DateTimeOriginal': 'date_taken',
@@ -19,6 +18,7 @@ EXIF_METADATA_MAPPING = {
     'exif:ExposureTime': 'exposure_time',
     'exif:PhotographicSensitivity': 'sensitivity',
 }
+
 
 
 ### App
@@ -83,7 +83,7 @@ def list_subdirs(path):
 def generate_uid(existing_uids):
     while True:
         # Generate a UID
-        uid = ''.join([random.choice(UID_CHARS) for i in range(UID_LENGTH)])
+        uid = ''.join([random.choice(UID_CHARS) for i in range(app.config['UID_LENGTH'])])
 
         # Check that it doesn't already exist before returning it, otherwise loop to generate another one
         if uid not in existing_uids:
@@ -233,25 +233,12 @@ def load_photos(path):
     # Apply detected modifications (photos added, moved, or deleted) to the database
     if photos_to_insert:
         rows_to_insert = []
-        keys = ['filename', 'path', 'uid', 'md5', 'width', 'height']
+        keys = ['filename', 'path', 'uid', 'md5']
         for photo in photos_to_insert:
             # Generate a new UID for this photo
             photo['uid'] = generate_uid(existing_uids)
             existing_uids.append(photo['uid'])
 
-            # If enabled, read the dimensions of the new photos right now because this is needed at the .grid-item element level; other metadata will be parsed when each photo is accessed
-            # This is optional because it is expensive when adding a large number of photos at once.
-            # If disabled, the dimensions will be read on a per-photo basis the first time each is displayed. This might be better for performance if multiple workers are used, but usually
-            # results in some GUI artifacts the first time it is shown.
-            if app.config['PRE_PARSE_DIMENSIONS']:
-                print(f"Reading dimensions of photo \"{photo['path'] + photo['filename']}\"...")
-                with Image(filename = app.config['PHOTOS_DIR'][:-1] + photo['path'] + photo['filename']) as image:
-                    photo['width'] = image.width
-                    photo['height'] = image.height
-            else:
-                photo['width'] = None
-                photo['height'] = None
-            
             rows_to_insert.append({key: photo[key] for key in keys})
 
         print(f"Inserting {len(rows_to_insert)} photo(s) in the database : " + ', '.join(['"' + photo['path'] + photo['filename'] + '"' for photo in photos_to_insert]))
@@ -270,11 +257,47 @@ def load_photos(path):
     if photos_to_insert or photos_to_remove or photos_to_move:
         displayed_photos = _load_photos(path, [], existing_uids, [], [], [], False)
 
+    # Add an index to the photos
+    for index, photo in enumerate(displayed_photos):
+        photo['index'] = index
+
     return displayed_photos
+
+
+# Calculate the dimensions of each photo in the given list and persist them to the database
+def calc_photos_dimensions(photos):
+    rows = []
+    for photo in photos:
+        if photo['width'] == None or photo['height'] == None:
+            print(f"Calculating dimensions of photo {photo['filename']}...")
+            row = {
+                'uid': photo['uid'],
+                'width': 0,
+                'height': 0,
+            }
+            try:
+                with Image(filename = app.config['PHOTOS_DIR'] + photo['path'][1:] + photo['filename']) as image:
+                    # Image dimensions
+                    row['width'] = image.width
+                    photo['width'] = image.width
+                    row['height'] = image.height
+                    photo['height'] = image.height
+                rows.append(row)
+            except CorruptImageError as e:
+                print(f"Photo \"{photo['path'][1:] + photo['filename']}\" is corrupted : {e}", file=sys.stderr)
+
+    if rows:
+        with get_db() as db:
+            cur = db.cursor()
+            cur.executemany("UPDATE photo SET width=:width, height=:height WHERE uid=:uid", rows)
 
 
 # Extract useful informations from the given photo and persist them to the database
 def parse_photo_metadata(photo):
+    if photo['metadata_parsed']:
+        # Metadata already parsed, nothing to do
+        return
+
     print(f"Parsing metadata for photo {photo['filename']}...")
     row = {
         'uid': photo['uid'],
@@ -369,15 +392,7 @@ def get_resized_photo(uid, prefix, max_size, quality):
             print(f"Photo \"{photo['path'][1:] + photo['filename']}\" is corrupted : {e}", file=sys.stderr)
         return send_from_directory(path, resized_filename)
 
-
-### Routes
-
-@app.route("/")
-def get_gallery():
-    return get_gallery_subdir('/')
-
-@app.route("/<path:path>/")
-def get_gallery_subdir(path):
+def check_path(path):
     # Make sure path if formatted correctly
     if not path.startswith('/'):
         path = '/' + path
@@ -387,19 +402,70 @@ def get_gallery_subdir(path):
     # Forbid opening subdirectories if INDEX_SUBDIRS is disabned
     if path != '/' and not app.config['INDEX_SUBDIRS']:
         abort(404)
+        return False
 
     # Prevent path traversal attacks
     if not os.path.commonprefix([app.config['PHOTOS_DIR'], app.config['PHOTOS_DIR'] + path]):
         abort(404)
+        return False
     
     # Make sure this directory exists in the filesystem and that none of the directories in the path starts with a dot (hidden directories)
-    elif not os.path.isdir(app.config['PHOTOS_DIR'] + path) or True in [p.startswith('.') for p in path.split('/')]:
+    if not os.path.isdir(app.config['PHOTOS_DIR'] + path) or True in [p.startswith('.') for p in path.split('/')]:
         abort(404)
+        return False
 
-    else:
+    return path
+
+
+
+### Routes
+
+@app.route("/.grid")
+def get_grid_root():
+    return get_grid('/')
+
+@app.route("/<path:path>/.grid")
+def get_grid(path):
+    path = check_path(path)
+    if path:
         # Load the photos from this path
         photos = load_photos(path)
 
+        # Only return a subset if requested
+        n_photos = len(photos)
+        start = 0
+        count = n_photos
+        try:
+            start = int(request.args.get('start', start))
+            if start < 0 or start >= n_photos:
+                start = 0
+            count = int(request.args.get('count', count))
+            if count < 0 or count > n_photos:
+                count = n_photos
+        except:
+            pass
+        if start != 0 or count != n_photos:
+            photos = photos[start:start+count]
+
+        # Only return a single UID if requested
+        requestedUID = request.args.get('uid', None)
+        if requestedUID:
+            photos = [photo for photo in photos if photo['uid'] == requestedUID]
+
+        # If the requested set is small enough, calculate the image sizes to improve the first display
+        if len(photos) <= 100:
+            calc_photos_dimensions(photos)
+
+        return render_template('grid.html', photos=photos, n_photos=n_photos)
+
+@app.route("/")
+def get_gallery_root():
+    return get_gallery('/')
+
+@app.route("/<path:path>/")
+def get_gallery(path):
+    path = check_path(path)
+    if path:
         # Navigation panel
         path_split = [d for d in path.split('/') if d]
         nav = {
@@ -409,17 +475,18 @@ def get_gallery_subdir(path):
             'path_split': path_split,
             'subdirs': sorted(list_subdirs(path)) if app.config['SHOW_NAVIGATION_PANEL'] else [],
         }
-        return render_template('main.html', photos=photos, nav=nav)
 
-@app.route("/<uid>")
-def get_photo(uid):
-    photo = get_photo_from_uid(uid)
-    return send_from_directory(app.config['PHOTOS_DIR'] + photo['path'][1:], photo['filename'])
+        return render_template('main.html', nav=nav, uid_chars=''.join(sorted(set(UID_CHARS))))
 
 @app.route("/<uid>/grid-item")
 def get_grid_item(uid):
     photo = get_photo_from_uid(uid)
     return render_template('grid-item.html', photo=photo)
+
+@app.route("/<uid>")
+def get_photo(uid):
+    photo = get_photo_from_uid(uid)
+    return send_from_directory(app.config['PHOTOS_DIR'] + photo['path'][1:], photo['filename'])
 
 @app.route("/<uid>/thumbnail")
 def get_thumbnail(uid):
