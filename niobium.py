@@ -392,6 +392,7 @@ def get_resized_photo(uid, prefix, max_size, quality):
             print(f"Photo \"{photo['path'][1:] + photo['filename']}\" is corrupted : {e}", file=sys.stderr)
         return send_from_directory(path, resized_filename)
 
+# Make sure the given path is valid and well-formatted
 def check_path(path):
     # Make sure path if formatted correctly
     if not path.startswith('/'):
@@ -415,6 +416,18 @@ def check_path(path):
         return False
 
     return path
+
+# Template data for the navigation panel
+def get_nav_data(path):
+    path_split = [d for d in path.split('/') if d]
+    nav = {
+        'is_root': path == '/',
+        'path_current': path,
+        'path_parent': '/' + '/'.join(path_split[:-1]) + '/',
+        'path_split': path_split,
+        'subdirs': sorted(list_subdirs(path)) if app.config['SHOW_NAVIGATION_PANEL'] else [],
+    }
+    return nav
 
 
 
@@ -457,6 +470,20 @@ def get_grid(path):
             calc_photos_dimensions(photos)
 
         return render_template('grid.html', photos=photos, n_photos=n_photos)
+    else:
+        abort(404)
+
+@app.route("/.nav")
+def get_nav_root():
+    return get_nav('/')
+
+@app.route("/<path:path>/.nav")
+def get_nav(path):
+    path = check_path(path)
+    if path:
+        return render_template('nav.html', nav=get_nav_data(path))
+    else:
+        abort(404)
 
 @app.route("/")
 def get_gallery_root():
@@ -466,17 +493,9 @@ def get_gallery_root():
 def get_gallery(path):
     path = check_path(path)
     if path:
-        # Navigation panel
-        path_split = [d for d in path.split('/') if d]
-        nav = {
-            'is_root': path == '/',
-            'path_current': path,
-            'path_parent': '/' + '/'.join(path_split[:-1]) + '/',
-            'path_split': path_split,
-            'subdirs': sorted(list_subdirs(path)) if app.config['SHOW_NAVIGATION_PANEL'] else [],
-        }
-
-        return render_template('main.html', nav=nav, uid_chars=''.join(sorted(set(UID_CHARS))))
+        return render_template('main.html', nav=get_nav_data(path), uid_chars=''.join(sorted(set(UID_CHARS))))
+    else:
+        abort(404)
 
 @app.route("/<uid>/grid-item")
 def get_grid_item(uid):

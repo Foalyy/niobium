@@ -4,8 +4,9 @@ let opacityTransitionInProgress = false;
 let opacityTransitionTimeout = undefined;
 let slideshowIntervalTimer = undefined;
 let loadGridBatchSize = 50;
-let loadingGrid = false;
 let mouseEnterEnabled = true;
+let loadGridRequest = undefined;
+let loadNavRequest = undefined;
 
 let gridStartIntersectionObserver = new IntersectionObserver(function(elements) {
     if (elements[0].isIntersecting) {
@@ -33,20 +34,99 @@ let gridItemIntersectionObserver = new IntersectionObserver(function(elements) {
     threshold: 0
 });
 
-function loadGrid(before=false, preselectedUID=undefined, around=false) {
-    if (loadingGrid) {
+function loadFolder(url, gridURL, navURL, addToHistory=true) {
+    stopSlideshow();
+    disconnectGridLoaderObservers();
+    if (gridURL == loadGridURL) {
         return;
     }
-    loadingGrid = true;
+    if (loadGridRequest) {
+        loadGridRequest.abort();
+        loadGridRequest = undefined
+    }
+    if (loadNavRequest) {
+        loadNavRequest.abort();
+        loadNavRequest = undefined
+    }
+    if (url == '/') {
+        document.title = TITLE;
+    } else {
+        let urlSplit = url.split('/').filter(e => e != '');
+        document.title = decodeURI(urlSplit[urlSplit.length-1]) + ' - ' + TITLE;
+    }
+    loadGridURL = gridURL;
+    loadNavURL = navURL;
+    if (addToHistory) {
+        url += window.location.hash;
+        history.pushState({'url': url, 'gridURL': gridURL, 'navURL': navURL}, '', url);
+    }
+    $('.grid-content').empty();
+    loadNav();
+    loadGrid();
+}
 
-    let request = new XMLHttpRequest();
-    request.onreadystatechange = function() {
+function loadNav() {
+    $('.nav-loading').removeClass('hidden');
+    if (loadNavRequest) {
+        loadNavRequest.abort();
+        loadNavRequest = undefined;
+    }
+    loadNavRequest = new XMLHttpRequest();
+    loadNavRequest.onreadystatechange = function() {
         if (this.status == 200) {
             if (this.readyState == 4) {
-                loadingGrid = false;
+                $('.nav-loading').addClass('hidden');
+                $('.navigation-panel-content').replaceWith(loadNavRequest.responseText);
+                $('.nav-link').on('click', function(event) {
+                    let link = event.target;
+                    if (link.nodeName != 'A') {
+                        link = $(link).parents('.nav-link');
+                    }
+                    loadFolder($(link).attr('href'), $(link).data('load-url'), $(link).data('nav-url'));
+                    event.preventDefault();
+                    event.stopPropagation();
+                });
+                $('.navigation-panel-subdir').on('mouseenter', function(event) {
+                    let subdir = event.target;
+                    if (!$(event.target).hasClass('navigation-panel-subdir')) {
+                        subdir = $(event.target).parents('.navigation-panel-subdir');
+                    }
+                    $('.navigation-panel-subdir.selected').removeClass('selected');
+                    $(subdir).addClass('selected');
+                });
+                let parentLinkWrapper = $('.navigation-panel-subdir-parent');
+                let buttonNavigateUp = $('.grid-action-navigate-up');
+                if (parentLinkWrapper.length > 0) {
+                    let parentLink = parentLinkWrapper.children('.nav-link');
+                    let buttonNavigateUpLink = buttonNavigateUp.children('.nav-link');
+                    buttonNavigateUpLink.attr('href', parentLink.attr('href'));
+                    buttonNavigateUpLink.data('load-url', parentLink.data('load-url'));
+                    buttonNavigateUpLink.data('nav-url', parentLink.data('nav-url'));
+                    buttonNavigateUp.removeClass('hidden');
+                } else {
+                    buttonNavigateUp.addClass('hidden');
+                }
+                loadNavRequest = undefined;
+            }
+        }
+    };
+    loadNavRequest.open('GET', loadNavURL, true);
+    loadNavRequest.send();
+    disconnectGridLoaderObservers();
+}
+
+function loadGrid(before=false, preselectedUID=undefined, around=false) {
+    if (loadGridRequest) {
+        loadGridRequest.abort();
+        loadGridRequest = undefined;
+    }
+    loadGridRequest = new XMLHttpRequest();
+    loadGridRequest.onreadystatechange = function() {
+        if (this.status == 200) {
+            if (this.readyState == 4) {
                 $('.grid-loading').addClass('hidden');
                 let gridContent = $('.grid-content');
-                $(request.responseText.replace(/\n/g, '').trim()).each(function(index, gridItem) {
+                $(loadGridRequest.responseText.replace(/\n/g, '').trim()).each(function(index, gridItem) {
                     if (gridItem.nodeName == "DIV") {
                         let gridItems = gridContent.children();
                         let inserted = false;
@@ -82,6 +162,8 @@ function loadGrid(before=false, preselectedUID=undefined, around=false) {
                 if (window.scrollY < $('.grid-content').offset().top) {
                     scrollToTop();
                 }
+                $('.grid-actions-topright').removeClass('hidden');
+                loadGridRequest = undefined;
             }
         }
     };
@@ -114,8 +196,8 @@ function loadGrid(before=false, preselectedUID=undefined, around=false) {
         }
         args = "?start=" + start + "&count=" + count;
     }
-    request.open('GET', loadGridURL + args, true);
-    request.send();
+    loadGridRequest.open('GET', loadGridURL + args, true);
+    loadGridRequest.send();
     disconnectGridLoaderObservers();
 }
 
@@ -336,12 +418,81 @@ function gridZoomOut() {
 
 function openNavigationPanel() {
     $('.navigation-panel-container').removeClass('invisible');
-    window.location.hash = 'nav';
+    history.replaceState({'url': window.location.pathname, 'gridURL': loadGridURL, 'navURL': loadNavURL}, '', window.location.pathname + '#nav');
 }
 
 function closeNavigationPanel() {
     $('.navigation-panel-container').addClass('invisible');
-    window.location.hash = '';
+    history.replaceState({'url': window.location.pathname, 'gridURL': loadGridURL, 'navURL': loadNavURL}, '', window.location.pathname);
+}
+
+function toggleNavigationPanel() {
+    if (isNavigationPanelOpen()) {
+        closeNavigationPanel();
+    } else {
+        openNavigationPanel();
+    }
+}
+
+function navigationPanelPrev() {
+    let selected = $('.navigation-panel-subdir.selected');
+    if (selected.length == 0) {
+        $('.navigation-panel-subdir').last().addClass('selected');
+    } else {
+        let prev = $(selected).prev();
+        if (prev.length > 0 && $(prev).hasClass('navigation-panel-subdir')) {
+            $(selected.removeClass('selected'));
+            $(prev).addClass('selected');
+        }
+    }
+}
+
+function navigationPanelNext() {
+    let selected = $('.navigation-panel-subdir.selected');
+    if (selected.length == 0) {
+        $('.navigation-panel-subdir').first().addClass('selected');
+    } else {
+        let next = $(selected).next();
+        if (next.length > 0) {
+            $(selected.removeClass('selected'));
+            $(next).addClass('selected');
+        }
+    }
+}
+
+function navigationPanelFirst() {
+    $('.navigation-panel-subdir.selected').removeClass('selected');
+    $('.navigation-panel-subdir').first().addClass('selected');
+}
+
+function navigationPanelLast() {
+    $('.navigation-panel-subdir.selected').removeClass('selected');
+    $('.navigation-panel-subdir').last().addClass('selected');
+}
+
+
+function navigationPanelPrev() {
+    let selected = $('.navigation-panel-subdir.selected');
+    if (selected.length == 0) {
+        $('.navigation-panel-subdir').last().addClass('selected');
+    } else {
+        let prev = $(selected).prev();
+        if (prev.length > 0 && $(prev).hasClass('navigation-panel-subdir')) {
+            $(selected.removeClass('selected'));
+            $(prev).addClass('selected');
+        }
+    }
+}
+function isNavigationPanelOpen() {
+    return !$('.navigation-panel-container').hasClass('invisible');
+}
+
+function navigateUp() {
+    let buttonNavigateUp = $('.grid-action-navigate-up');
+    if (!buttonNavigateUp.hasClass('hidden')) {
+        let buttonNavigateUpLink = buttonNavigateUp.children('.nav-link');
+        loadFolder(buttonNavigateUpLink.attr('href'), buttonNavigateUpLink.data('load-url'), buttonNavigateUpLink.data('nav-url'));
+    }
 }
 
 function openLoupe(gridItem) {
@@ -589,19 +740,31 @@ function downloadCurrentPhoto() {
 $(function() {
     let preselectedUID = undefined;
     if (window.location.hash) {
-        if (window.location.hash == '#nav') {
-            openNavigationPanel();
-        } else {
-            let hashValue = window.location.hash.substr(1);
-            if (hashValue.length == UID_LENGTH) {
-                let allowedChars = UID_CHARS.split('');
-                preselectedUID = hashValue.split('').filter(c => allowedChars.indexOf(c) >= 0).join('');
-            }
+        let hashValue = window.location.hash.substr(1);
+        if (hashValue.length == UID_LENGTH) {
+            let allowedChars = UID_CHARS.split('');
+            preselectedUID = hashValue.split('').filter(c => allowedChars.indexOf(c) >= 0).join('');
         }
     }
+    if (preselectedUID == undefined && (window.location.hash == '#nav' || openNav)) {
+        openNavigationPanel();
+        openNav = false;
+    }
 
+    loadNav();
     loadGrid(false, preselectedUID);
 
+    $(window).on('popstate', function(event) {
+        if (event.state && 'url' in event.state && 'gridURL' in event.state && 'navURL' in event.state) {
+            loadFolder(event.state.url, event.state.gridURL, event.state.navURL, false);
+        }
+    });
+
+    $('.grid-action-navigate-up .nav-link').on('click', function(event) {
+        navigateUp();
+        event.preventDefault();
+        event.stopPropagation();
+    });
     $('.loupe').on('click', function(event) {
         closeLoupe();
         event.preventDefault();
@@ -659,69 +822,87 @@ $(function() {
     });
 
     window.onkeydown = function(event) {
-        if (event.ctrlKey || event.shiftKey || event.metaKey || event.altKey) {
-            return;
-        }
-        if (event.code == 'Escape') {
+        if (event.code == 'Escape' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             if (isLoupeOpen()) {
                 closeLoupe();
+            } else if (isNavigationPanelOpen()) {
+                closeNavigationPanel();
             } else {
                 deselect();
             }
 
-        } else if (event.code == 'ArrowLeft') {
+        } else if (event.code == 'ArrowLeft' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             if (isLoupeOpen()) {
                 loupePrev();
+            } else if (isNavigationPanelOpen()) {
+                navigationPanelPrev();
             } else {
                 selectPrev();
             }
 
-        } else if (event.code == 'ArrowRight') {
+        } else if (event.code == 'ArrowRight' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             if (isLoupeOpen()) {
                 loupeNext();
+            } else if (isNavigationPanelOpen()) {
+                navigationPanelNext();
             } else {
                 selectNext();
             }
 
-        } else if (event.code == 'ArrowDown') {
+        } else if (event.code == 'ArrowDown' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             if (isLoupeOpen()) {
                 loupeNext();
+            } else if (isNavigationPanelOpen()) {
+                navigationPanelNext();
             } else {
                 selectBelow();
             }
 
-        } else if (event.code == 'ArrowUp') {
+        } else if (event.code == 'ArrowUp' && !event.ctrlKey && !event.shiftKey && !event.metaKey) {
             event.preventDefault();
-            if (isLoupeOpen()) {
+            if (event.altKey) {
+                navigateUp();
+            } else if (isLoupeOpen()) {
                 loupePrev();
+            } else if (isNavigationPanelOpen()) {
+                navigationPanelPrev();
             } else {
                 selectAbove();
             }
 
-        } else if (event.code == 'Home') {
+        } else if (event.code == 'Home' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             if (isLoupeOpen()) {
                 loupeFirst();
+            } else if (isNavigationPanelOpen()) {
+                navigationPanelFirst();
             } else {
                 selectFirst();
             }
 
-        } else if (event.code == 'End') {
+        } else if (event.code == 'End' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             if (isLoupeOpen()) {
                 loupeLast();
+            } else if (isNavigationPanelOpen()) {
+                navigationPanelLast();
             } else {
                 selectLast();
             }
 
-        } else if (event.code == 'Enter' || event.code == 'KeyF') {
+        } else if ((event.code == 'Enter' || event.code == 'KeyF') && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             if (isLoupeOpen()) {
                 loupeNext();
+            } else if (isNavigationPanelOpen()) {
+                let link = $('.navigation-panel-subdir.selected .nav-link');
+                if (link.length > 0) {
+                    loadFolder($(link).attr('href'), $(link).data('load-url'), $(link).data('nav-url'));
+                }
             } else {
                 let selected = $('.grid-item.selected');
                 if (selected.length == 0) {
@@ -730,17 +911,21 @@ $(function() {
                 openLoupe($('.grid-item.selected'));
             }
 
-        } else if (event.code == 'KeyI') {
+        } else if (event.code == 'KeyN' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
+            event.preventDefault();
+            toggleNavigationPanel();
+
+        } else if (event.code == 'KeyI' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             toggleShowMetadata();
 
-        } else if (event.code == 'KeyD') {
+        } else if (event.code == 'KeyD' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             if (isLoupeOpen()) {
                 downloadCurrentPhoto();
             }
 
-        } else if (event.code == 'Space') {
+        } else if (event.code == 'Space' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             if (isLoupeOpen()) {
                 if (isSlideshowStarted()) {
@@ -757,13 +942,13 @@ $(function() {
                 startSlideshow();
             }
 
-        } else if (event.key == "+") {
+        } else if (event.key == '+' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             if (!isLoupeOpen()) {
                 gridZoomIn();
             }
 
-        } else if (event.key == "-") {
+        } else if (event.key == '-' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             if (!isLoupeOpen()) {
                 gridZoomOut();

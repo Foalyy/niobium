@@ -228,8 +228,9 @@ body {
 
 .navigation-panel-title {
     margin-bottom: 1.2rem;
-    font-size: 150%;
+    font-size: 180%;
     text-align: center;
+    font-weight: bold;
 }
 
 .navigation-panel-current-path {
@@ -287,12 +288,13 @@ body {
 }
 
 .navigation-panel-subdir {
-    margin-left: 2rem;
+    margin-left: 0.75rem;
 }
 
 .navigation-panel-subdir-parent a,
 .navigation-panel-subdir-current a,
 .navigation-panel-subdir a {
+    position: relative;
     padding-left: 0;
     padding-top: 0.5em;
     padding-bottom: 0.5em;
@@ -302,11 +304,31 @@ body {
     transition: color 0.2s ease, padding-left 0.2s ease;
 }
 
-.navigation-panel-subdir-parent a:hover,
-.navigation-panel-subdir-current a:hover,
-.navigation-panel-subdir a:hover {
+.navigation-panel-subdir-parent.selected .nav-link,
+.navigation-panel-subdir-current.selected .nav-link,
+.navigation-panel-subdir.selected .nav-link {
     padding-left: 0.5em;
     color: var(--navigation-panel-highlight-color);
+}
+
+.navigation-panel-subdir .nav-link .fa-folder {
+    position: relative;
+    left: 1.25em;
+    opacity: 1;
+    transition: opacity 0.2s linear;
+}
+
+.navigation-panel-subdir .nav-link .fa-folder-open {
+    opacity: 0;
+    transition: opacity 0.2s linear;
+}
+
+.navigation-panel-subdir.selected .nav-link .fa-folder {
+    opacity: 0;
+}
+
+.navigation-panel-subdir.selected .nav-link .fa-folder-open {
+    opacity: 1;
 }
 
 .loupe {

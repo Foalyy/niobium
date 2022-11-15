@@ -1,0 +1,28 @@
+<div class="navigation-panel-content">
+    {% if config.TITLE %}<div class="navigation-panel-title">{{ config.TITLE }}</div>{% endif %}
+    <div class="navigation-panel-current-path">
+        {% if nav.path_split %}
+            {% set ns = namespace(current_path='') %}
+            {% for dir in nav.path_split %}
+                {% if loop.index0 == 0 %}
+                    <div class="navigation-panel-current-path-separator navigation-panel-current-path-separator-first"><a class="nav-link" href="{{ url_for('get_gallery', path='/') }}" data-load-url="{{ url_for('get_grid', path='/') }}" data-nav-url="{{ url_for('get_nav', path='/') }}">/</a></div>
+                {% else %}
+                    <div class="navigation-panel-current-path-separator">/</div>
+                {% endif %}
+                {% set ns.current_path = ns.current_path + '/' + dir %}
+                <div class="navigation-panel-current-path-element"><a class="nav-link" href="{{ url_for('get_gallery', path=ns.current_path) }}" data-load-url="{{ url_for('get_grid', path=ns.current_path) }}" data-nav-url="{{ url_for('get_nav', path=ns.current_path) }}">{{ dir }}</a></div>
+            {% endfor %}
+        {% else %}
+            <div class="navigation-panel-current-path-separator navigation-panel-current-path-separator-first"><a class="nav-link" href="{{ url_for('get_gallery', path='/') }}" data-load-url="{{ url_for('get_grid', path='/') }}" data-nav-url="{{ url_for('get_nav', path='/') }}">/</a></div>
+        {% endif %}
+    </div>
+    <ul class="navigation-panel-subdirs">
+        {% if not nav.is_root %}
+            <li class="navigation-panel-subdir-parent"><a class="nav-link" href="{{ url_for('get_gallery', path=nav.path_parent[:-1]) }}" data-load-url="{{ url_for('get_grid', path=nav.path_parent[:-1]) }}" data-nav-url="{{ url_for('get_nav', path=nav.path_parent[:-1]) }}"><i class="fa-solid fa-circle-chevron-left fa-fw"></i> {% if nav.path_split[-2] %}{{ nav.path_split[-2] }}{% else %}/{% endif %}</a></li>
+        {% endif %}
+        <li class="navigation-panel-subdir-current"><a class="nav-link" href="{{ url_for('get_gallery', path=nav.path_current[:-1]) }}" data-load-url="{{ url_for('get_grid', path=nav.path_current[:-1]) }}" data-nav-url="{{ url_for('get_nav', path=nav.path_current[:-1]) }}"><i class="fa-solid fa-folder-open fa-fw"></i> {% if nav.path_split[-1] %}{{ nav.path_split[-1] }}{% else %}/{% endif %}</a></li>
+        {% for subdir in nav.subdirs %}
+            <li class="navigation-panel-subdir"><a class="nav-link" href="{{ url_for('get_gallery', path=nav.path_current+subdir) }}" data-load-url="{{ url_for('get_grid', path=nav.path_current+subdir) }}" data-nav-url="{{ url_for('get_nav', path=nav.path_current+subdir) }}"><i class="fa-solid fa-folder fa-fw"></i><i class="fa-solid fa-folder-open fa-fw"></i> {{ subdir }}</a></li>
+        {% endfor %}
+    </ul>
+</div>

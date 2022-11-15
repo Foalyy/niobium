@@ -1,6 +1,6 @@
 {% extends "layout.html" %}
 
-{% block title %}{% if not nav.is_root %}{% for dir in nav.path_split %}{{ dir }} / {% endfor %} - {% endif %}{% endblock %}
+{% block title %}{% if not nav.is_root %}{{ nav.path_split[-1] }} - {% endif %}{% endblock %}
 
 {% block head %}
     <style>
@@ -33,9 +33,7 @@
             </div>
             <div class="grid-actions grid-actions-topleft">
                 {% if config.SHOW_NAVIGATION_PANEL %}
-                    {% if not nav.is_root %}
-                        <div class="grid-button grid-action-navigate-up" title="Navigate to the parent directory"><a href="{{ url_for('get_gallery', path=parent_dir_path) }}"><i class="fa-solid fa-circle-chevron-left fa-fw"></i></a></div>
-                    {% endif %}
+                    <div class="grid-button grid-action-navigate-up hidden" title="Navigate to the parent directory"><a class="nav-link" href="" data-load-url="" data-nav-url=""><i class="fa-solid fa-circle-chevron-left fa-fw"></i></a></div>
                     <div class="grid-button grid-action-open-navigation-panel" title="Open the navigation panel"><i class="fa-solid fa-folder-tree fa-fw"></i></div>
                 {% endif %}
             </div>
@@ -43,33 +41,9 @@
                 <div class="navigation-panel-container invisible">
                     <div class="navigation-panel">
                         <div class="navigation-panel-close"><i class="fa-solid fa-xmark fa-fw"></i></div>
-                        <div class="navigation-panel-content">
-                            {% if config.TITLE %}<div class="navigation-panel-title">{{ config.TITLE }}</div>{% endif %}
-                            <div class="navigation-panel-current-path">
-                                {% if nav.path_split %}
-                                    {% set ns = namespace(current_path='') %}
-                                    {% for dir in nav.path_split %}
-                                        {% if loop.index0 == 0 %}
-                                            <div class="navigation-panel-current-path-separator navigation-panel-current-path-separator-first"><a href="{{ url_for('get_gallery', path='/') }}">/</a></div>
-                                        {% else %}
-                                            <div class="navigation-panel-current-path-separator">/</div>
-                                        {% endif %}
-                                        {% set ns.current_path = ns.current_path + '/' + dir %}
-                                        <div class="navigation-panel-current-path-element"><a href="{{ url_for('get_gallery', path=ns.current_path) }}">{{ dir }}</a></div>
-                                    {% endfor %}
-                                {% else %}
-                                    <div class="navigation-panel-current-path-separator navigation-panel-current-path-separator-first"><a href="{{ url_for('get_gallery', path='/') }}">/</a></div>
-                                {% endif %}
-                            </div>
-                            <ul class="navigation-panel-subdirs">
-                                {% if not nav.is_root %}
-                                    <li class="navigation-panel-subdir-parent"><a href="{{ url_for('get_gallery', path=nav.path_parent[:-1]) }}"><i class="fa-solid fa-circle-chevron-left fa-fw"></i> {% if nav.path_split[-2] %}{{ nav.path_split[-2] }}{% else %}/{% endif %}</a></li>
-                                {% endif %}
-                                <li class="navigation-panel-subdir-current"><a href="{{ url_for('get_gallery', path=nav.path_current[:-1]) }}"><i class="fa-solid fa-folder-open fa-fw"></i> {% if nav.path_split[-1] %}{{ nav.path_split[-1] }}{% else %}/{% endif %}</a></li>
-                                {% for subdir in nav.subdirs %}
-                                    <li class="navigation-panel-subdir"><a href="{{ url_for('get_gallery', path=nav.path_current+subdir) }}"><i class="fa-solid fa-folder fa-fw"></i> {{ subdir }}</a></li>
-                                {% endfor %}
-                            </ul>
+                        <div class="navigation-panel-content"></div>
+                        <div class="loading loading-fullsize nav-loading">
+                            <div class="spinner"><i class="fas fa-spinner"></i></div>
                         </div>
                     </div>
                     <div class="navigation-panel-background">
@@ -112,10 +86,13 @@
     <script>
         const UID_LENGTH = {{ config.UID_LENGTH }};
         const UID_CHARS = '{{ uid_chars }}';
+        const TITLE = '{{ config.TITLE }}';
         let loadGridURL = '{{ url_for('get_grid', path=nav.path_current[:-1]) }}';
+        let loadNavURL = '{{ url_for('get_nav', path=nav.path_current[:-1]) }}';
         let rowHeight = {{ config.DEFAULT_ROW_HEIGHT }};
         let rowHeightStep = {{ config.ROW_HEIGHT_STEP }};
         let slideshowDelay = {{ config.SLIDESHOW_DELAY }};
         let showMetadata = {{ config.METADATA_VISIBLE_BY_DEFAULT | lower }};
+        let openNav = {{ (config.OPEN_NAVIGATION_PANEL_BY_DEFAULT and nav.subdirs != []) | lower }};
     </script>
 {% endblock %}
