@@ -29,6 +29,10 @@ body {
     font-family: 'Open Sans', sans-serif;
 }
 
+.no-scroll {
+    overflow-y: hidden;
+}
+
 .hidden {
     display: none !important;
 }
@@ -270,9 +274,20 @@ body {
     color: var(--navigation-panel-highlight-color);
 }
 
+.navigation-panel-n-photos {
+    opacity: 1;
+    margin-top: 0.5em;
+    color: #909090;
+    text-align: center;
+}
+
+.navigation-panel-n-photos.invisible {
+    opacity: 0;
+}
+
 .navigation-panel-subdirs {
     list-style: none;
-    margin-top: 1rem;
+    margin-top: 0.5rem;
     margin-left: 1rem;
     flex-grow: 1;
     overflow-x: hidden;
@@ -329,6 +344,14 @@ body {
 
 .navigation-panel-subdir.selected .nav-link .fa-folder-open {
     opacity: 1;
+}
+
+.navigation-panel-no-subdirs {
+    margin-left: 2rem;
+    color: #808080;
+    font-style: italic;
+    padding-top: 0.5em;
+    padding-bottom: 0.5em;
 }
 
 .loupe {

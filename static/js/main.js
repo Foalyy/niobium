@@ -58,7 +58,7 @@ function loadFolder(url, gridURL, navURL, addToHistory=true) {
     loadNavURL = navURL;
     if (addToHistory) {
         url += window.location.hash;
-        history.pushState({'url': url, 'gridURL': gridURL, 'navURL': navURL}, '', url);
+        history.pushState({'url': url, 'gridURL': gridURL, 'navURL': navURL, 'navPanelOpen': isNavigationPanelOpen()}, '', url);
     }
     $('.grid-content').empty();
     loadNav();
@@ -106,6 +106,7 @@ function loadNav() {
                 } else {
                     buttonNavigateUp.addClass('hidden');
                 }
+                updateNPhotos();
                 loadNavRequest = undefined;
             }
         }
@@ -113,6 +114,10 @@ function loadNav() {
     loadNavRequest.open('GET', loadNavURL, true);
     loadNavRequest.send();
     disconnectGridLoaderObservers();
+}
+
+function isLoadingNav() {
+    return loadNavRequest != undefined;
 }
 
 function loadGrid(before=false, preselectedUID=undefined, around=false) {
@@ -126,26 +131,32 @@ function loadGrid(before=false, preselectedUID=undefined, around=false) {
             if (this.readyState == 4) {
                 $('.grid-loading').addClass('hidden');
                 let gridContent = $('.grid-content');
-                $(loadGridRequest.responseText.replace(/\n/g, '').trim()).each(function(index, gridItem) {
-                    if (gridItem.nodeName == "DIV") {
-                        let gridItems = gridContent.children();
-                        let inserted = false;
-                        for (i = gridItems.length - 1; i >= 0; i--) {
-                            let loopGridItem = $(gridItems.get(i));
-                            if ($(gridItem).data('index') >= loopGridItem.data('index')) {
-                                if ($(gridItem).data('index') != loopGridItem.data('index')) {
-                                    $(gridItem).insertAfter(loopGridItem);
+                let response = $(loadGridRequest.responseText.replace(/\n/g, '').trim());
+                if (response.length > 0) {
+                    response.each(function(index, gridItem) {
+                        if (gridItem.nodeName == "DIV") {
+                            let gridItems = gridContent.children();
+                            let inserted = false;
+                            for (i = gridItems.length - 1; i >= 0; i--) {
+                                let loopGridItem = $(gridItems.get(i));
+                                if ($(gridItem).data('index') >= loopGridItem.data('index')) {
+                                    if ($(gridItem).data('index') != loopGridItem.data('index')) {
+                                        $(gridItem).insertAfter(loopGridItem);
+                                    }
+                                    inserted = true;
+                                    break;
                                 }
-                                inserted = true;
-                                break;
                             }
+                            if (!inserted) {
+                                $(gridItem).prependTo(gridContent);
+                            }
+                            gridItemIntersectionObserver.observe(gridItem);
                         }
-                        if (!inserted) {
-                            $(gridItem).prependTo(gridContent);
-                        }
-                        gridItemIntersectionObserver.observe(gridItem);
-                    }
-                });
+                    });
+                    $('.background').addClass('hidden');
+                } else {
+                    $('.background').removeClass('hidden');
+                }
                 if (preselectedUID && !around) {
                     loadGrid(false, preselectedUID, true);
                     let gridItem = $('[data-uid="' + preselectedUID + '"]');
@@ -163,6 +174,7 @@ function loadGrid(before=false, preselectedUID=undefined, around=false) {
                     scrollToTop();
                 }
                 $('.grid-actions-topright').removeClass('hidden');
+                updateNPhotos();
                 loadGridRequest = undefined;
             }
         }
@@ -402,6 +414,10 @@ function selectLast() {
     });
 }
 
+function isGridSelected() {
+    return $('.grid-item.selected').length > 0;
+}
+
 function deselect() {
     $('.grid-item.selected').removeClass('selected');
 }
@@ -416,14 +432,20 @@ function gridZoomOut() {
     document.documentElement.style.setProperty('--row-height', rowHeight + 'vh');
 }
 
-function openNavigationPanel() {
+function openNavigationPanel(addToHistory=true) {
     $('.navigation-panel-container').removeClass('invisible');
-    history.replaceState({'url': window.location.pathname, 'gridURL': loadGridURL, 'navURL': loadNavURL}, '', window.location.pathname + '#nav');
+    $('body').addClass('no-scroll');
+    if (addToHistory) {
+        history.pushState({'url': window.location.pathname, 'gridURL': loadGridURL, 'navURL': loadNavURL, 'navPanelOpen': true}, '', window.location.pathname + '#nav');
+    }
 }
 
-function closeNavigationPanel() {
+function closeNavigationPanel(addToHistory=true) {
     $('.navigation-panel-container').addClass('invisible');
-    history.replaceState({'url': window.location.pathname, 'gridURL': loadGridURL, 'navURL': loadNavURL}, '', window.location.pathname);
+    $('body').removeClass('no-scroll');
+    if (addToHistory) {
+        history.pushState({'url': window.location.pathname, 'gridURL': loadGridURL, 'navURL': loadNavURL, 'navPanelOpen': false}, '', window.location.pathname);
+    }
 }
 
 function toggleNavigationPanel() {
@@ -432,6 +454,10 @@ function toggleNavigationPanel() {
     } else {
         openNavigationPanel();
     }
+}
+
+function isNavigationPanelOpen() {
+    return !$('.navigation-panel-container').hasClass('invisible');
 }
 
 function navigationPanelPrev() {
@@ -470,21 +496,20 @@ function navigationPanelLast() {
     $('.navigation-panel-subdir').last().addClass('selected');
 }
 
-
-function navigationPanelPrev() {
-    let selected = $('.navigation-panel-subdir.selected');
-    if (selected.length == 0) {
-        $('.navigation-panel-subdir').last().addClass('selected');
-    } else {
-        let prev = $(selected).prev();
-        if (prev.length > 0 && $(prev).hasClass('navigation-panel-subdir')) {
-            $(selected.removeClass('selected'));
-            $(prev).addClass('selected');
+function scrollNavigationToSelectedLink() {
+    let panel = $('.navigation-panel-subdirs');
+    let navLink = $('.navigation-panel-subdir.selected');
+    if (navLink.length > 0) {
+        let panelTop = panel.offset().top;
+        let panelBottom = panelTop + panel.height();
+        let navLinkTop = navLink.offset().top;
+        let navLinkBottom = navLinkTop + navLink.outerHeight();
+        if (navLinkTop < panelTop) {
+            panel.get(0).scrollBy(0, navLinkTop - panelTop);
+        } else if (navLinkBottom > panelBottom) {
+            panel.get(0).scrollBy(0, navLinkBottom - panelBottom);
         }
     }
-}
-function isNavigationPanelOpen() {
-    return !$('.navigation-panel-container').hasClass('invisible');
 }
 
 function navigateUp() {
@@ -492,6 +517,24 @@ function navigateUp() {
     if (!buttonNavigateUp.hasClass('hidden')) {
         let buttonNavigateUpLink = buttonNavigateUp.children('.nav-link');
         loadFolder(buttonNavigateUpLink.attr('href'), buttonNavigateUpLink.data('load-url'), buttonNavigateUpLink.data('nav-url'));
+    }
+}
+
+function loadSelectedNavigationLink() {
+    let link = $('.navigation-panel-subdir.selected .nav-link');
+    if (link.length > 0) {
+        loadFolder($(link).attr('href'), $(link).data('load-url'), $(link).data('nav-url'));
+    }
+}
+
+function updateNPhotos() {
+    let span = $('.navigation-panel-n-photos-value');
+    if (span.length > 0) {
+        let gridItem = $('.grid-item').first();
+        if (gridItem.length > 0) {
+            span.text(gridItem.data('count'));
+            span.parent().removeClass('invisible');
+        }
     }
 }
 
@@ -757,6 +800,11 @@ $(function() {
     $(window).on('popstate', function(event) {
         if (event.state && 'url' in event.state && 'gridURL' in event.state && 'navURL' in event.state) {
             loadFolder(event.state.url, event.state.gridURL, event.state.navURL, false);
+            if (event.state.navPanelOpen && !isNavigationPanelOpen()) {
+                openNavigationPanel(false);
+            } else if (!event.state.navPanelOpen && isNavigationPanelOpen()) {
+                closeNavigationPanel(false);
+            }
         }
     });
 
@@ -828,8 +876,10 @@ $(function() {
                 closeLoupe();
             } else if (isNavigationPanelOpen()) {
                 closeNavigationPanel();
-            } else {
+            } else if (isGridSelected()) {
                 deselect();
+            } else {
+                openNavigationPanel();
             }
 
         } else if (event.code == 'ArrowLeft' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
@@ -837,7 +887,9 @@ $(function() {
             if (isLoupeOpen()) {
                 loupePrev();
             } else if (isNavigationPanelOpen()) {
-                navigationPanelPrev();
+                if (!isLoadingNav()) {
+                    navigateUp();
+                }
             } else {
                 selectPrev();
             }
@@ -847,7 +899,9 @@ $(function() {
             if (isLoupeOpen()) {
                 loupeNext();
             } else if (isNavigationPanelOpen()) {
-                navigationPanelNext();
+                if (!isLoadingNav()) {
+                    loadSelectedNavigationLink();
+                }
             } else {
                 selectNext();
             }
@@ -857,7 +911,10 @@ $(function() {
             if (isLoupeOpen()) {
                 loupeNext();
             } else if (isNavigationPanelOpen()) {
-                navigationPanelNext();
+                if (!isLoadingNav()) {
+                    navigationPanelNext();
+                    scrollNavigationToSelectedLink();
+                }
             } else {
                 selectBelow();
             }
@@ -869,7 +926,10 @@ $(function() {
             } else if (isLoupeOpen()) {
                 loupePrev();
             } else if (isNavigationPanelOpen()) {
-                navigationPanelPrev();
+                if (!isLoadingNav()) {
+                    navigationPanelPrev();
+                    scrollNavigationToSelectedLink();
+                }
             } else {
                 selectAbove();
             }
@@ -879,7 +939,9 @@ $(function() {
             if (isLoupeOpen()) {
                 loupeFirst();
             } else if (isNavigationPanelOpen()) {
-                navigationPanelFirst();
+                if (!isLoadingNav()) {
+                    navigationPanelFirst();
+                }
             } else {
                 selectFirst();
             }
@@ -889,7 +951,9 @@ $(function() {
             if (isLoupeOpen()) {
                 loupeLast();
             } else if (isNavigationPanelOpen()) {
-                navigationPanelLast();
+                if (!isLoadingNav()) {
+                    navigationPanelLast();
+                }
             } else {
                 selectLast();
             }
@@ -899,9 +963,8 @@ $(function() {
             if (isLoupeOpen()) {
                 loupeNext();
             } else if (isNavigationPanelOpen()) {
-                let link = $('.navigation-panel-subdir.selected .nav-link');
-                if (link.length > 0) {
-                    loadFolder($(link).attr('href'), $(link).data('load-url'), $(link).data('nav-url'));
+                if (!isLoadingNav()) {
+                    loadSelectedNavigationLink();
                 }
             } else {
                 let selected = $('.grid-item.selected');
