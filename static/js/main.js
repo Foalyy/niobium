@@ -73,8 +73,8 @@ function loadNav() {
     }
     loadNavRequest = new XMLHttpRequest();
     loadNavRequest.onreadystatechange = function() {
-        if (this.status == 200) {
-            if (this.readyState == 4) {
+        if (this.readyState == 4) {
+            if (this.status == 200) {
                 $('.nav-loading').addClass('hidden');
                 $('.navigation-panel-content').replaceWith(loadNavRequest.responseText);
                 $('.nav-link').on('click', function(event) {
@@ -108,6 +108,9 @@ function loadNav() {
                 }
                 updateNPhotos();
                 loadNavRequest = undefined;
+            } else {
+                $('.nav-loading').addClass('hidden');
+                $('.nav-loading-error').removeClass('hidden');
             }
         }
     };
@@ -127,8 +130,8 @@ function loadGrid(before=false, preselectedUID=undefined, around=false) {
     }
     loadGridRequest = new XMLHttpRequest();
     loadGridRequest.onreadystatechange = function() {
-        if (this.status == 200) {
-            if (this.readyState == 4) {
+        if (this.readyState == 4) {
+            if (this.status == 200) {
                 $('.grid-loading').addClass('hidden');
                 let gridContent = $('.grid-content');
                 let response = $(loadGridRequest.responseText.replace(/\n/g, '').trim());
@@ -176,6 +179,9 @@ function loadGrid(before=false, preselectedUID=undefined, around=false) {
                 $('.grid-actions-topright').removeClass('hidden');
                 updateNPhotos();
                 loadGridRequest = undefined;
+            } else {
+                $('.grid-loading').addClass('hidden');
+                $('.grid-loading-error').removeClass('hidden');
             }
         }
     };
@@ -237,15 +243,15 @@ function loadPhoto(gridItem, callback) {
     if (!$(gridItem).data('loaded')) {
         let request = new XMLHttpRequest();
         request.onreadystatechange = function() {
-            if (this.status == 200) {
-                if (this.readyState == 4) {
+            if (this.readyState == 4) {
+                if (this.status == 200) {
                     if ($(gridItem).children('img').length > 0) {
                         return;
                     }
                     $(request.responseText.replace(/\n/g, '').trim()).prependTo($(gridItem));
                     let image = $(gridItem).children('.photo');
                     $(image).on('load', function() {
-                        $(image).parent().children('.loading').remove()
+                        $(image).parent().children('.loading').remove();
                         $(image).removeClass('transparent');
                         $(image).on('click', function(event) {
                             let openGridItem = $(this).parents('.grid-item');
@@ -266,6 +272,9 @@ function loadPhoto(gridItem, callback) {
                     });
                     $(image).attr('src', $(image).data('src-thumbnail'));
                     $(gridItem).data('loaded', true);
+                } else {
+                    $(gridItem).children('.loading').remove();
+                    $(gridItem).children('.loading-error').removeClass('hidden');
                 }
             }
         };

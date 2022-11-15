@@ -1,6 +1,6 @@
 __pycache__
 venv
-niobium.sqlite
+*.sqlite
 cache/*
 photos/*
 static/photos

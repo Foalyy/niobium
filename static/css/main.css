@@ -4,6 +4,7 @@
     --selected-expansion: 1.5vh;
     --navigation-panel-background-color: #0F1221F5;
     --navigation-panel-highlight-color: #5F8FFF;
+    --color-error: #A91F08;
 }
 
 *, *::before, *::after {
@@ -62,6 +63,26 @@ body {
     opacity: 0.1;
     animation: rotation 1s infinite;
     animation-timing-function: linear;
+}
+
+.loading-error {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    gap: 0.5em;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    color: var(--color-error);
+    font-weight: bold;
+}
+
+.loading-error .error-message {
+    max-width: 10em;
+    text-align: center;
 }
 
 @keyframes rotation {

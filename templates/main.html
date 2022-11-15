@@ -31,6 +31,10 @@
             <div class="loading loading-fullsize grid-loading">
                 <div class="spinner"><i class="fas fa-spinner"></i></div>
             </div>
+            <div class="loading-error grid-loading-error hidden">
+                <i class="fas fa-triangle-exclamation"></i>
+                <div class="error-message">An error happened while loading the photos</div>
+            </div>
             <div class="grid-actions grid-actions-topleft">
                 {% if config.SHOW_NAVIGATION_PANEL %}
                     <div class="grid-button grid-action-navigate-up hidden" title="Navigate to the parent directory"><a class="nav-link" href="" data-load-url="" data-nav-url=""><i class="fa-solid fa-circle-chevron-left fa-fw"></i></a></div>
@@ -44,6 +48,10 @@
                         <div class="navigation-panel-close"><i class="fa-solid fa-xmark fa-fw"></i></div>
                         <div class="loading loading-fullsize nav-loading">
                             <div class="spinner"><i class="fas fa-spinner"></i></div>
+                        </div>
+                        <div class="loading-error nav-loading-error hidden">
+                            <i class="fas fa-triangle-exclamation"></i>
+                            <div class="error-message">An error happened while loading the menu</div>
                         </div>
                     </div>
                     <div class="navigation-panel-background">
