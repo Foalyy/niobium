@@ -7,6 +7,8 @@ let loadGridBatchSize = 50;
 let mouseEnterEnabled = true;
 let loadGridRequest = undefined;
 let loadNavRequest = undefined;
+let slideshowTimeStep = 20;
+let slideshowTimeCounter = 0;
 
 let gridStartIntersectionObserver = new IntersectionObserver(function(elements) {
     if (elements[0].isIntersecting) {
@@ -160,6 +162,7 @@ function loadGrid(before=false, preselectedUID=undefined, around=false) {
                 } else {
                     $('.background').removeClass('hidden');
                 }
+                loadGridRequest = undefined;
                 if (preselectedUID && !around) {
                     loadGrid(false, preselectedUID, true);
                     let gridItem = $('[data-uid="' + preselectedUID + '"]');
@@ -178,7 +181,6 @@ function loadGrid(before=false, preselectedUID=undefined, around=false) {
                 }
                 $('.grid-actions-topright').removeClass('hidden');
                 updateNPhotos();
-                loadGridRequest = undefined;
             } else {
                 $('.grid-loading').addClass('hidden');
                 $('.grid-loading-error').removeClass('hidden');
@@ -717,6 +719,7 @@ function isLoupeOpen() {
 }
 
 function loupePrev() {
+    slideshowTimeCounter = 0;
     let prev = $(loupeElement).parent().prev();
     if (prev.length > 0) {
         setLoupePhoto(prev);
@@ -728,6 +731,7 @@ function loupePrev() {
 }
 
 function loupeNext(loop=false) {
+    slideshowTimeCounter = 0;
     let next = $(loupeElement).parent().next();
     if (next.length > 0) {
         setLoupePhoto(next);
@@ -741,12 +745,14 @@ function loupeNext(loop=false) {
 }
 
 function loupeFirst() {
+    slideshowTimeCounter = 0;
     let first = $(loupeElement).parents('.grid-content').children().first();
     setLoupePhoto(first);
     selectPhoto(first);
 }
 
 function loupeLast() {
+    slideshowTimeCounter = 0;
     let last = $(loupeElement).parents('.grid-content').children().last();
     setLoupePhoto(last);
     selectPhoto(last);
@@ -764,20 +770,38 @@ function toggleShowMetadata() {
 function startSlideshow() {
     if (!slideshowIntervalTimer) {
         $('.loupe-action-slideshow-start').addClass('hidden');
-        $('.loupe-action-slideshow-stop').removeClass('hidden');
+        let btnStop = $('.loupe-action-slideshow-stop');
+        btnStop.addClass('button-progress');
+        btnStop.removeClass('hidden');
         slideshowIntervalTimer = setInterval(function() {
-            loupeNext(true);
-        }, slideshowDelay);
+            slideshowTimeCounter++;
+            if (slideshowTimeCounter * slideshowTimeStep >= slideshowDelay) {
+                slideshowTimeCounter = 0;
+                loupeNext(true);
+            }
+            updateSlideshowProgress(100.0 * slideshowTimeCounter * slideshowTimeStep / slideshowDelay);
+        }, slideshowTimeStep);
     }
 }
 
 function stopSlideshow() {
     if (slideshowIntervalTimer) {
         $('.loupe-action-slideshow-start').removeClass('hidden');
-        $('.loupe-action-slideshow-stop').addClass('hidden');
+        let btnStop = $('.loupe-action-slideshow-stop');
+        btnStop.addClass('hidden');
+        btnStop.removeClass('button-progress');
+        updateSlideshowProgress(0);
         clearInterval(slideshowIntervalTimer);
         slideshowIntervalTimer = undefined;
+        slideshowTimeCounter = 0;
     }
+}
+
+function updateSlideshowProgress(progress) {
+    if (progress > 100) {
+        progress = 100;
+    }
+    $('.loupe-action-slideshow-stop').css('--progress', progress + 'deg');
 }
 
 function isSlideshowStarted() {
