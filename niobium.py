@@ -423,7 +423,7 @@ def get_nav_data(path):
     nav = {
         'is_root': path == '/',
         'path_current': path,
-        'path_parent': '/' + '/'.join(path_split[:-1]) + '/',
+        'path_parent': ('/' + '/'.join(path_split[:-1]) + '/') if len(path_split) >= 2 else '/',
         'path_split': path_split,
         'subdirs': sorted(list_subdirs(path)) if app.config['SHOW_NAVIGATION_PANEL'] else [],
     }
@@ -481,7 +481,22 @@ def get_nav_root():
 def get_nav(path):
     path = check_path(path)
     if path:
-        return render_template('nav.html', nav=get_nav_data(path))
+        nav = get_nav_data(path)
+
+        nav['open_subdir'] = None
+        nav['path_split_open'] = nav['path_split'][:]
+        nav['path_navigate_up'] = nav['path_parent'] if not nav['is_root'] else None
+        if app.config['SHOW_NAVIGATION_PANEL']:
+            # If this directory doesn't contain subdirectories, keep showing its parent instead and simply mark it as 'open'
+            if nav['subdirs'] == [] and nav['path_current'] != '/':
+                nav['open_subdir'] = nav['path_split'][-1]
+                nav['path_split'] = nav['path_split'][:-1]
+                nav['path_current'] = ('/' + '/'.join(nav['path_split']) + '/') if nav['path_split'] else '/'
+                nav['is_root'] = nav['path_current'] == '/'
+                nav['path_parent'] = ('/' + '/'.join(nav['path_split'][:-1]) + '/') if len(nav['path_split']) >= 2 else '/'
+                nav['subdirs'] = sorted(list_subdirs(nav['path_current']))
+        
+        return render_template('nav.html', nav=nav)
     else:
         abort(404)
 

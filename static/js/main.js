@@ -36,7 +36,7 @@ let gridItemIntersectionObserver = new IntersectionObserver(function(elements) {
     threshold: 0
 });
 
-function loadFolder(url, gridURL, navURL, addToHistory=true) {
+function loadFolder(url, gridURL, navURL, addToHistory=true, preselectedSubdir=undefined) {
     stopSlideshow();
     disconnectGridLoaderObservers();
     if (gridURL == loadGridURL) {
@@ -63,15 +63,19 @@ function loadFolder(url, gridURL, navURL, addToHistory=true) {
         history.pushState({'url': url, 'gridURL': gridURL, 'navURL': navURL, 'navPanelOpen': isNavigationPanelOpen()}, '', url);
     }
     $('.grid-content').empty();
-    loadNav();
+    loadNav(preselectedSubdir);
     loadGrid();
 }
 
-function loadNav() {
+function loadNav(preselectedSubdir=undefined) {
     $('.nav-loading').removeClass('hidden');
     if (loadNavRequest) {
         loadNavRequest.abort();
         loadNavRequest = undefined;
+    }
+    let selectedLink = $('.navigation-panel-subdir.selected');
+    if (preselectedSubdir == undefined && selectedLink.length > 0) {
+        preselectedSubdir = selectedLink.attr('href');
     }
     loadNavRequest = new XMLHttpRequest();
     loadNavRequest.onreadystatechange = function() {
@@ -79,6 +83,10 @@ function loadNav() {
             if (this.status == 200) {
                 $('.nav-loading').addClass('hidden');
                 $('.navigation-panel-content').replaceWith(loadNavRequest.responseText);
+                let selectedLink = $('.navigation-panel-subdir.selected');
+                if (selectedLink.length == 0 && preselectedSubdir) {
+                    $('.navigation-panel-subdir a[href="' + preselectedSubdir + '"]').parent().addClass('selected');
+                }
                 $('.nav-link').on('click', function(event) {
                     let link = event.target;
                     if (link.nodeName != 'A') {
@@ -96,14 +104,16 @@ function loadNav() {
                     $('.navigation-panel-subdir.selected').removeClass('selected');
                     $(subdir).addClass('selected');
                 });
-                let parentLinkWrapper = $('.navigation-panel-subdir-parent');
+                $('.navigation-panel-subdir').on('mouseleave', function(event) {
+                    $('.navigation-panel-subdir.selected').removeClass('selected');
+                });
                 let buttonNavigateUp = $('.grid-action-navigate-up');
-                if (parentLinkWrapper.length > 0) {
-                    let parentLink = parentLinkWrapper.children('.nav-link');
+                let navigateUpLink = $('.link-navigate-up');
+                if (navigateUpLink.length > 0) {
                     let buttonNavigateUpLink = buttonNavigateUp.children('.nav-link');
-                    buttonNavigateUpLink.attr('href', parentLink.attr('href'));
-                    buttonNavigateUpLink.data('load-url', parentLink.data('load-url'));
-                    buttonNavigateUpLink.data('nav-url', parentLink.data('nav-url'));
+                    buttonNavigateUpLink.attr('href', navigateUpLink.data('href'));
+                    buttonNavigateUpLink.data('load-url', navigateUpLink.data('load-url'));
+                    buttonNavigateUpLink.data('nav-url', navigateUpLink.data('nav-url'));
                     buttonNavigateUp.removeClass('hidden');
                 } else {
                     buttonNavigateUp.addClass('hidden');
@@ -527,7 +537,7 @@ function navigateUp() {
     let buttonNavigateUp = $('.grid-action-navigate-up');
     if (!buttonNavigateUp.hasClass('hidden')) {
         let buttonNavigateUpLink = buttonNavigateUp.children('.nav-link');
-        loadFolder(buttonNavigateUpLink.attr('href'), buttonNavigateUpLink.data('load-url'), buttonNavigateUpLink.data('nav-url'));
+        loadFolder(buttonNavigateUpLink.attr('href'), buttonNavigateUpLink.data('load-url'), buttonNavigateUpLink.data('nav-url'), true, $('.navigation-panel-subdir-current a').attr('href'));
     }
 }
 
