@@ -119,6 +119,7 @@ function loadNav(preselectedSubdir=undefined) {
                     buttonNavigateUp.addClass('hidden');
                 }
                 updateNPhotos();
+                scrollNavigationToSelectedLink();
                 loadNavRequest = undefined;
             } else {
                 $('.nav-loading').addClass('hidden');

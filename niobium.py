@@ -27,7 +27,7 @@ EXIF_METADATA_MAPPING = {
 app = Flask(__name__)
 
 # Read the config file
-app.config.from_file('config.toml', load=toml.load)
+app.config.from_file('niobium.config', load=toml.load)
 
 # Check directories specified in config
 for dir_name in ['PHOTOS_DIR', 'CACHE_DIR']:
@@ -69,13 +69,24 @@ app.teardown_appcontext(close_db)
 ### Photos
 
 # Return the list of valid subdirectories in the given path in the photos folder
-def list_subdirs(path):
+def list_subdirs(path, include_hidden=False):
     if not path.startswith('/'):
         path = '/' + path
+    if not path.endswith('/'):
+        path += '/'
     subdirs = []
     with os.scandir(app.config['PHOTOS_DIR'][:-1] + path) as directory:
         for entry in directory:
             if entry.is_dir() and not entry.name.startswith('.'):
+                try:
+                    with open(app.config['PHOTOS_DIR'][:-1] + path + entry.name + '/.niobium.config', 'r') as f:
+                        subdir_config = toml.load(f)
+                        if not subdir_config.get('INDEX', True):
+                            continue
+                        if not include_hidden and subdir_config.get('HIDDEN', False):
+                            continue
+                except FileNotFoundError:
+                    pass
                 subdirs.append(entry.name)
     return subdirs
 
@@ -97,11 +108,29 @@ def calculate_file_md5(filepath):
 # Load the photos from the filesystem and sync them with the database
 def load_photos(path):
     # Inner function used to load photos recursively
-    def _load_photos(path, displayed_photos, existing_uids, photos_to_insert, photos_to_remove, paths_found, is_subdir):
+    def _load_photos(config, path, displayed_photos, existing_uids, photos_to_insert, photos_to_remove, paths_found, is_subdir):
         # Make sure this path is formatted correctly and append it to the list of paths found
         if not path.endswith('/'):
             path += '/'
         paths_found.append(path)
+
+        # Try to find a config file in this directory and append it to the current one
+        parent_config = config # Backup from the parent directory's config
+        this_dir_config = {} # Config applied to this directory only
+        config = config.copy() # Config passed on from the parent with local overrides applied
+        try:
+            with open(app.config['PHOTOS_DIR'][:-1] + path + '.niobium.config', 'r') as f:
+                this_dir_config = toml.load(f)
+                this_dir_config_copy = this_dir_config.copy()
+
+                # HIDDEN only applies to subdirectories, and a HIDDEN=false doesn't override a parent HIDDEN=true
+                if not is_subdir or parent_config.get('HIDDEN', False):
+                    this_dir_config_copy.pop('HIDDEN', False)
+
+                config.update(this_dir_config_copy)
+
+        except FileNotFoundError:
+            pass
 
         # List the files inside this path in the photos directory
         filenames_in_fs = []
@@ -115,7 +144,7 @@ def load_photos(path):
             cur = db.cursor()
 
             # Get the list of photos saved in the database for this path
-            sql = "SELECT * FROM photo WHERE path=:path ORDER BY " + ', '.join([clause + " " + ("ASC", "DESC")[app.config['REVERSE_SORT_ORDER']] for clause in app.config['SORT_ORDER'].split(',')])
+            sql = "SELECT * FROM photo WHERE path=:path ORDER BY " + ', '.join([clause + " " + ("ASC", "DESC")[config['REVERSE_SORT_ORDER']] for clause in config['SORT_ORDER'].split(',')])
             cur.execute(sql, {'path': path})
             photos_in_db = [{key: row[key] for key in row.keys()} for row in cur.fetchall()]
 
@@ -136,7 +165,7 @@ def load_photos(path):
                 except FileNotFoundError:
                     resized_photos = []
                 for resized_photo in resized_photos:
-                    uid = resized_photo[len(prefix): -len(suffix)]
+                    uid = resized_photo[len(prefix):-len(suffix)]
                     if not uid in all_uids_in_path:
                         resized_photos_to_delete.append(resized_photo)
             if resized_photos_to_delete:
@@ -144,15 +173,15 @@ def load_photos(path):
                 for resized_photo in resized_photos_to_delete:
                     os.remove(app.config['CACHE_DIR'][:-1] + path + resized_photo)
 
-        # If this is a subdirectory, add these photos only if the SHOW_PHOTOS_FROM_SUBDIRS config is enabled
-        if not is_subdir or app.config['SHOW_PHOTOS_FROM_SUBDIRS']:
-            # Filter out hidden photos
+        # If this is a subdirectory, add these photos only if the SHOW_PHOTOS_FROM_SUBDIRS config is enabled and this directory is not hidden
+        if (not is_subdir) or (parent_config.get('SHOW_PHOTOS_FROM_SUBDIRS', True) and not config.get('HIDDEN', False)):
+            # Also filter out photos marked as 'hidden' in the database
             displayed_photos += [photo for photo in photos_in_db if not photo['hidden']]
 
         # If the INDEX_SUBDIRS config is enabled, recursively load photos from subdirectories
         if app.config['INDEX_SUBDIRS']:
             # Find the list of subdirectories in the path, in the filesystem
-            subdirs = list_subdirs(path)
+            subdirs = list_subdirs(path, True)
 
             # Clean obsolete subdirectories (that do not correspond to a subdirectory in the photos folder) from the cache folder
             subdirs_in_cache = []
@@ -175,7 +204,7 @@ def load_photos(path):
             if subdirs:
                 subdirs.sort()
                 for subdir in subdirs:
-                    displayed_photos = _load_photos(path + subdir, displayed_photos, existing_uids, photos_to_insert, photos_to_remove, paths_found, True)
+                    displayed_photos = _load_photos(config, path + subdir, displayed_photos, existing_uids, photos_to_insert, photos_to_remove, paths_found, True)
 
         return displayed_photos
 
@@ -184,6 +213,19 @@ def load_photos(path):
         if not os.path.isdir(app.config[dir_name]):
             print("Creating empty directory " + app.config[dir_name])
             os.makedirs(app.config[dir_name])
+
+    # Find all the local config files parent to this path
+    config = app.config.copy()
+    path_split = [d for d in path.split('/') if d]
+    current_path = ''
+    for d in [''] + path_split[:-1]:
+        current_path += d + '/'
+        try:
+            with open(app.config['PHOTOS_DIR'][:-1] + current_path + '.niobium.config', 'r') as f:
+                config.update(toml.load(f))
+        except FileNotFoundError:
+            pass
+    config.pop('HIDDEN', False) # This setting is not passed on from the parent to the currently open path
 
     # Get all existing UIDs from the database
     with get_db() as db:
@@ -196,7 +238,7 @@ def load_photos(path):
     photos_to_insert = []
     photos_to_remove = []
     paths_found = []
-    displayed_photos = _load_photos(path, displayed_photos, existing_uids, photos_to_insert, photos_to_remove, paths_found, False)
+    displayed_photos = _load_photos(config, path, displayed_photos, existing_uids, photos_to_insert, photos_to_remove, paths_found, False)
 
     # Get the list of all known subdirs of the current path in the database, check if some have been removed, and if so add their photos to the 'to_remove' list
     if app.config['INDEX_SUBDIRS']:
@@ -255,7 +297,7 @@ def load_photos(path):
 
     # If there were some modifications to the photos, reload the database after updating it
     if photos_to_insert or photos_to_remove or photos_to_move:
-        displayed_photos = _load_photos(path, [], existing_uids, [], [], [], False)
+        displayed_photos = _load_photos(config, path, [], existing_uids, [], [], [], False)
 
     # Add an index to the photos
     for index, photo in enumerate(displayed_photos):
@@ -425,7 +467,7 @@ def get_nav_data(path):
         'path_current': path,
         'path_parent': ('/' + '/'.join(path_split[:-1]) + '/') if len(path_split) >= 2 else '/',
         'path_split': path_split,
-        'subdirs': sorted(list_subdirs(path)) if app.config['SHOW_NAVIGATION_PANEL'] else [],
+        'subdirs': sorted(list_subdirs(path, False)) if app.config['SHOW_NAVIGATION_PANEL'] else [],
     }
     return nav
 
@@ -494,8 +536,10 @@ def get_nav(path):
                 nav['path_current'] = ('/' + '/'.join(nav['path_split']) + '/') if nav['path_split'] else '/'
                 nav['is_root'] = nav['path_current'] == '/'
                 nav['path_parent'] = ('/' + '/'.join(nav['path_split'][:-1]) + '/') if len(nav['path_split']) >= 2 else '/'
-                nav['subdirs'] = sorted(list_subdirs(nav['path_current']))
-        
+                nav['subdirs'] = sorted(list_subdirs(nav['path_current'], False))
+                if not nav['open_subdir'] in nav['subdirs']:
+                    nav['subdirs'] = sorted(nav['subdirs'] + [nav['open_subdir']]) # Happens when the currently open directory is both hidden and without subdirs
+
         return render_template('nav.html', nav=nav)
     else:
         abort(404)
