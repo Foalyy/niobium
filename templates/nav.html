@@ -26,7 +26,7 @@
         {% endif %}
         <li class="navigation-panel-subdir-current"><a class="nav-link" href="{{ url_for('get_gallery', path=nav.path_current[:-1]) }}" data-load-url="{{ url_for('get_grid', path=nav.path_current[:-1]) }}" data-nav-url="{{ url_for('get_nav', path=nav.path_current[:-1]) }}"><i class="fa-solid fa-folder-open fa-fw"></i> {% if nav.path_split[-1] %}{{ nav.path_split[-1] }}{% else %}/{% endif %}</a></li>
         {% for subdir in nav.subdirs %}
-            <li class="navigation-panel-subdir{% if subdir == nav.open_subdir %} navigation-panel-subdir-open selected{% endif %}"><a class="nav-link" href="{{ url_for('get_gallery', path=nav.path_current+subdir) }}" data-load-url="{{ url_for('get_grid', path=nav.path_current+subdir) }}" data-nav-url="{{ url_for('get_nav', path=nav.path_current+subdir) }}"><i class="fa-solid fa-folder fa-fw"></i><i class="fa-solid fa-folder-open fa-fw"></i> {{ subdir }}</a></li>
+            <li class="navigation-panel-subdir{% if subdir == nav.open_subdir %} navigation-panel-subdir-open selected{% endif %}"><a class="nav-link" href="{{ url_for('get_gallery', path=nav.path_current+subdir) }}" data-load-url="{{ url_for('get_grid', path=nav.path_current+subdir) }}" data-nav-url="{{ url_for('get_nav', path=nav.path_current+subdir) }}"><i class="fa-solid fa-folder fa-fw"></i><i class="fa-solid fa-folder-open fa-fw"></i> {% if subdir in nav.locked_subdirs %}<i class="fa-solid fa-lock fa-fw"></i> {% endif %}{{ subdir }}</a></li>
         {% else %}
             <li class="navigation-panel-no-subdirs">No subdirectories</li>
         {% endfor %}

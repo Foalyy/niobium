@@ -1,5 +1,5 @@
-import os, sys, shutil, random, toml, sqlite3, hashlib
-from flask import Flask, request, current_app, g, render_template, abort, send_from_directory, stream_with_context
+import os, sys, shutil, random, toml, sqlite3, hashlib, base64, secrets
+from flask import Flask, request, session, current_app, g, make_response, render_template, abort, send_from_directory
 from werkzeug.middleware.proxy_fix import ProxyFix
 import werkzeug
 from wand.image import Image
@@ -25,6 +25,16 @@ EXIF_METADATA_MAPPING = {
 
 # Create the main app object
 app = Flask(__name__)
+
+# Try to open the .secret file used to sign the session cookies, or generate one
+try:
+    with open('.secret', 'r') as f:
+        app.secret_key = f.readline()
+except FileNotFoundError:
+    secret_key = secrets.token_hex()
+    app.secret_key = secret_key
+    with open('.secret', 'w') as f:
+        f.write(app.secret_key)
 
 # Read the config file
 app.config.from_file('niobium.config', load=toml.load)
@@ -173,8 +183,22 @@ def load_photos(path):
                 for resized_photo in resized_photos_to_delete:
                     os.remove(app.config['CACHE_DIR'][:-1] + path + resized_photo)
 
-        # If this is a subdirectory, add these photos only if the SHOW_PHOTOS_FROM_SUBDIRS config is enabled and this directory is not hidden
-        if (not is_subdir) or (parent_config.get('SHOW_PHOTOS_FROM_SUBDIRS', True) and not config.get('HIDDEN', False)):
+        # Check if a password is required for this path, and if so, if it has been provided
+        is_password_ok = False
+        if config.get('PASSWORD', False):
+            # Try to find a matching password in the user's session
+            passwords = session.setdefault('passwords', {})
+            for p in passwords.keys():
+                if path.startswith(p) and passwords[p] == config.get('PASSWORD', None):
+                    is_password_ok = True # Valid password found in session
+        else:
+            is_password_ok = True # No password required
+
+        # If this is a subdirectory, add these photos only if :
+        #   - the SHOW_PHOTOS_FROM_SUBDIRS config is enabled
+        #   - this directory is not hidden
+        #   - the password has been provided, if required
+        if (not is_subdir) or (parent_config.get('SHOW_PHOTOS_FROM_SUBDIRS', True) and not config.get('HIDDEN', False) and is_password_ok):
             # Also filter out photos marked as 'hidden' in the database
             displayed_photos += [photo for photo in photos_in_db if not photo['hidden']]
 
@@ -459,6 +483,45 @@ def check_path(path):
 
     return path
 
+def check_password(path):
+    # Look for a config file in this path and every parent directory to check if a password is required
+    config = app.config.copy()
+    path_split = [d for d in path.split('/') if d]
+    current_path = ''
+    for d in [''] + path_split:
+        current_path += d + '/'
+        try:
+            with open(app.config['PHOTOS_DIR'][:-1] + current_path + '.niobium.config', 'r') as f:
+                config.update(toml.load(f))
+        except FileNotFoundError:
+            pass
+    password = config.get('PASSWORD', None)
+    if not password:
+        return True # No password required
+    
+    # Try to find a matching password in the user's session
+    passwords = session.setdefault('passwords', {})
+    for p in passwords.keys():
+        if path.startswith(p) and passwords[p] == password:
+            return True # Password in session matches the required one
+
+    # If the user provided a password in the Authorization header, try it
+    provided_auth = request.headers.get('Authorization')
+    if provided_auth:
+        provided_password = str(base64.b64decode(provided_auth), 'utf-8')
+        if provided_password == password:
+            # Provided password matches the required one, add it to the session
+            session['passwords'][path] = provided_password
+            session.modified = True
+            return True
+        else:
+            # The provided password is invalid
+            raise werkzeug.exceptions.HTTPException(response=make_response('Invalid password', 401))
+     
+    # A password is required but none was provided
+    raise werkzeug.exceptions.HTTPException(response=make_response('A password is required to access this gallery', 401))
+
+
 # Template data for the navigation panel
 def get_nav_data(path):
     path_split = [d for d in path.split('/') if d]
@@ -468,6 +531,7 @@ def get_nav_data(path):
         'path_parent': ('/' + '/'.join(path_split[:-1]) + '/') if len(path_split) >= 2 else '/',
         'path_split': path_split,
         'subdirs': sorted(list_subdirs(path, False)) if app.config['SHOW_NAVIGATION_PANEL'] else [],
+        'locked_subdirs': [],
     }
     return nav
 
@@ -483,6 +547,10 @@ def get_grid_root():
 def get_grid(path):
     path = check_path(path)
     if path:
+        # Check if a password is required to access this directory
+        if not check_password(path):
+            return
+
         # Load the photos from this path
         photos = load_photos(path)
 
@@ -523,13 +591,16 @@ def get_nav_root():
 def get_nav(path):
     path = check_path(path)
     if path:
-        nav = get_nav_data(path)
+        # Check if a password is required to access this directory
+        if not check_password(path):
+            return
 
+        # If this directory doesn't contain subdirectories, keep showing its parent instead and simply mark it as 'open'
+        nav = get_nav_data(path)
         nav['open_subdir'] = None
         nav['path_split_open'] = nav['path_split'][:]
         nav['path_navigate_up'] = nav['path_parent'] if not nav['is_root'] else None
         if app.config['SHOW_NAVIGATION_PANEL']:
-            # If this directory doesn't contain subdirectories, keep showing its parent instead and simply mark it as 'open'
             if nav['subdirs'] == [] and nav['path_current'] != '/':
                 nav['open_subdir'] = nav['path_split'][-1]
                 nav['path_split'] = nav['path_split'][:-1]
@@ -539,6 +610,17 @@ def get_nav(path):
                 nav['subdirs'] = sorted(list_subdirs(nav['path_current'], False))
                 if not nav['open_subdir'] in nav['subdirs']:
                     nav['subdirs'] = sorted(nav['subdirs'] + [nav['open_subdir']]) # Happens when the currently open directory is both hidden and without subdirs
+
+        # For every subdir, check if it is locked
+        for subdir in nav['subdirs']:
+            try:
+                with open(app.config['PHOTOS_DIR'][:-1] + nav['path_current'] + subdir + '/.niobium.config', 'r') as f:
+                    config = toml.load(f)
+                    password = config.get('PASSWORD', None)
+                    if password and session.setdefault('passwords', {}).get(nav['path_current'] + subdir + '/', None) != password:
+                        nav['locked_subdirs'].append(subdir)
+            except:
+                pass
 
         return render_template('nav.html', nav=nav)
     else:

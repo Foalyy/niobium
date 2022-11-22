@@ -3,4 +3,4 @@ venv
 *.sqlite
 cache/*
 photos/*
-static/photos
+.secret

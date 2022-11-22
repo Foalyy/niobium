@@ -382,6 +382,142 @@ body {
     padding-bottom: 0.5em;
 }
 
+.password-prompt-container {
+    position: absolute;
+    width: 100vw;
+    height: 100vh;
+    top: 0;
+    left: 0;
+    background-color: #202020C0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 1;
+    z-index: 300;
+    overflow: hidden;
+    transition: opacity 0.5s ease;
+}
+
+.password-prompt-container.invisible {
+    opacity: 0;
+}
+
+.password-prompt {
+    position: relative;
+    width: 30em;
+    height: 13em;
+    border-radius: 1em;
+    padding: 2em;
+    color: #C0C0C0;
+    background-color: #101010;
+    box-shadow: 0 0 3em #00000050;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.password-prompt-icon {
+    font-size: 200%;
+    width: 1.25em;
+    transition: color 0.4s ease;
+}
+
+.password-prompt-icon-locked,
+.password-prompt-icon-unlocked {
+    position: absolute;
+    opacity: 1;
+    transition: opacity 0.5s ease;
+}
+
+.password-prompt-icon-unlocked {
+    opacity: 0;
+}
+
+.password-prompt-open .password-prompt-icon-locked {
+    opacity: 0;
+}
+
+.password-prompt-open .password-prompt-icon-unlocked {
+    opacity: 1;
+}
+
+.password-prompt-message {
+    margin-top: 1.5em;
+    transition: color 0.3s ease;
+}
+
+.password-prompt-input-container {
+    position: relative;
+}
+
+.password-prompt-input {
+    background: #404040;
+    border: none;
+    color: white;
+    font-size: 1.2rem;
+    text-align: center;
+    border-radius: 1.3rem;
+    height: 2.6rem;
+    outline: 1px solid #808080;
+    box-shadow: inset 0 0 0 #454545;
+    opacity: 1;
+    transition: outline 0.5s ease, box-shadow 0.5s ease, opacity 0.2s ease;
+}
+
+.password-prompt-input.invisible {
+    opacity: 0.1;
+}
+
+.password-prompt-input:focus {
+    outline: 1px solid #A0A0A0;
+    box-shadow: inset 0 0 1.5em #4A4A4A;
+}
+
+.password-prompt-error .password-prompt-input:focus {
+    outline: 1px solid var(--color-error);
+}
+
+.password-prompt-exit,
+.password-prompt-validate {
+    position: absolute;
+    width: 2rem;
+    height: 2rem;
+    top: 0.3rem;
+    right: 0.3rem;
+    border-radius: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+    color: #FFFFFF;
+}
+
+.password-prompt-validate {
+    background-color: #909090F0;
+}
+
+.password-prompt-exit:hover,
+.password-prompt-validate:hover {
+    opacity: 0.9;
+}
+
+.password-prompt-validate.invisible {
+    opacity: 0.1;
+}
+
+.password-prompt-input-container .spinner {
+    opacity: 0.6;
+}
+
+.password-prompt-error .password-prompt-icon,
+.password-prompt-error .password-prompt-message {
+    color: var(--color-error);
+    font-weight: bold;
+}
+
 .loupe {
     position: absolute;
     width: 100vw;
