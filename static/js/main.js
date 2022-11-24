@@ -303,7 +303,7 @@ function loadGrid(before=false, preselectedUID=undefined, around=false, password
                 start = gridItems.last().data('index') + 1;
             }
         }
-        args = "?start=" + start + "&count=" + count;
+        args = "&start=" + start + "&count=" + count;
     }
     loadGridRequest.open('GET', loadGridURL + args, true);
     if (password) {
