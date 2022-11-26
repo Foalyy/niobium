@@ -1,6 +1,7 @@
-use rocket::serde::{Serialize, Deserialize};
+use crate::Error;
 use std::fs;
-use std::io;
+use std::path::Path;
+use rocket::serde::{Serialize, Deserialize};
 
 pub const FILENAME: &'static str = "niobium.config";
 
@@ -91,20 +92,45 @@ pub struct Config {
 }
 
 impl Config {
+
     pub fn read() -> Result<Self, Error> {
-        Ok(toml::from_str(Self::read_as_string()?.as_str())
+        Ok(toml::from_str(Self::read_path_as_string(FILENAME)?.as_str())
             .map_err(|e| Error::ParseError(e))?)
     }
 
     pub fn read_as_value() -> Result<toml::Value, Error> {
-        Ok(Self::read_as_string()?.parse::<toml::Value>()
+        Self::read_path_as_value(FILENAME)
+    }
+
+    pub fn read_path_as_string<P>(path: P) -> Result<String, Error>
+        where P: AsRef<Path>
+    {
+        fs::read_to_string(path)
+            .map_err(|e| Error::FileError(e))
+    }
+
+    pub fn read_path_as_value<P>(path: P) -> Result<toml::Value, Error>
+        where P: AsRef<Path>
+    {
+        Ok(Self::read_path_as_string(path)?.parse::<toml::Value>()
             .map_err(|e| Error::ParseError(e))?)
     }
 
-    fn read_as_string() -> Result<String, Error> {
-        fs::read_to_string(FILENAME)
-            .map_err(|e| Error::FileError(e))
+    pub fn update_with<'a>(value: &'a mut toml::Value, other: &toml::Value) -> &'a toml::Value {
+        if let Some(table) = value.as_table_mut() {
+            if let Some(other_table) = other.as_table() {
+                for entry in other_table.iter() {
+                    table.insert(entry.0.clone(), entry.1.clone());
+                }
+            }
+        }
+        value
     }
+
+    pub fn from(value: toml::Value) -> Result<Self, toml::de::Error> {
+        value.try_into::<Self>()
+    }
+
 }
 
 
@@ -184,9 +210,3 @@ pub fn uid_chars() -> &'static str {
 // pub fn uid_chars_set() -> &'static str {
 //     "0123456789abcdefghijklmnopqrstuvwxyz"
 // }
-
-
-pub enum Error {
-    FileError(io::Error),
-    ParseError(toml::de::Error),
-}

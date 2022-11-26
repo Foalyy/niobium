@@ -4,38 +4,31 @@ mod config;
 mod nav_data;
 mod photos;
 
-use std::{io, fs};
-use std::path::PathBuf;
-use std::sync::Mutex;
-use rocket::{fs::FileServer, State};
-use rocket_dyn_templates::{Template, context};
-use rusqlite::{Connection, OptionalExtension};
 use config::{Config, uid_chars};
 use nav_data::NavData;
+use std::{io, fmt::Display};
+use std::path::PathBuf;
+use rocket::{fs::FileServer, State, tokio::sync::Mutex};
+use rocket_dyn_templates::{Template, context};
+use rusqlite::{Connection, OptionalExtension};
 
-
-#[derive(Responder)]
-pub enum PageResult {
-    Ok(Template),
-    #[response(status = 404)]
-    NotFound(Template),
-    #[response(status = 500)]
-    Err(io::Error),
-}
 
 
 #[launch]
-fn rocket() -> _ {
+async fn rocket() -> _ {
     // Try to read the config file
     let config = read_config_or_exit();
 
     // Try to open a connection to the SQLite database
-    let db = open_db_or_exit(&config);
+    let db = Mutex::new(open_db_or_exit(&config));
 
     // Load the photos, or exit immediately in case of an error
     // Note : photos::load() will print the error message on stderr
-    photos::load(&PathBuf::from(""), &config)
-        .or_else(|_| -> io::Result<Vec<photos::Photo>> { std::process::exit(-1) }).unwrap();
+    photos::load(&PathBuf::from(""), &config, &db).await
+        .unwrap_or_else(|error| {
+            eprintln!("Error : unable to load photos : {}", error);
+            std::process::exit(-1)
+        });
 
     // Let's go to spaaace !
     rocket::build()
@@ -47,7 +40,7 @@ fn rocket() -> _ {
         .mount("/static", FileServer::from("static/").rank(0))
         .attach(Template::fairing())
         .manage(config)
-        .manage(Mutex::new(db))
+        .manage(db)
 }
 
 
@@ -69,12 +62,15 @@ fn get_gallery(path: PathBuf, config: &State<Config>) -> PageResult {
             }))
         }
 
-        Err(error) => match error.kind() {
-            // The path is either not found or invalid for the current config, return the 404 template
-            io::ErrorKind::NotFound => page_404(&config),
-            
-            // For any other error, forward the error to the 500 Internal Error catcher
-            _ => PageResult::Err(error),
+        Err(error) => match error {
+            Error::FileError(error) => match error.kind() {
+                // The path is either not found or invalid for the current config, return the 404 template
+                io::ErrorKind::NotFound => page_404(&config),
+                
+                // For any other error, forward the error to the 500 Internal Error catcher
+                _ => PageResult::Err(()),
+            },
+            _ => PageResult::Err(()),
         }
     }
 }
@@ -82,22 +78,25 @@ fn get_gallery(path: PathBuf, config: &State<Config>) -> PageResult {
 
 /// Route handler called by AJAX to return the grid items for the given path and parameters
 #[get("/<path..>?grid&<start>&<count>&<uid>", rank=1)]
-fn get_grid(path: PathBuf, start: Option<u32>, count: Option<u32>, uid: Option<String>, config: &State<Config>, db: &State<Mutex<Connection>>) -> PageResult {
+async fn get_grid(path: PathBuf, start: Option<u32>, count: Option<u32>, uid: Option<String>, config: &State<Config>, db: &State<Mutex<Connection>>) -> PageResult {
     // Try to load the photos in the given path
-    match photos::load(&path, &config) {
+    match photos::load(&path, config, db).await {
 
-        // We have a valid (but possibly empty) list of photos, render it as a template
+        // We have a valid (possibly empty) list of photos, render it as a template
         Ok(photos) => PageResult::Ok(Template::render("grid", context! {
             config: config.inner(),
             photos: photos,
         })),
 
-        Err(error) => match error.kind() {
-            // The path is either not found or invalid for the current config, return the 404 template
-            io::ErrorKind::NotFound => page_404(&config),
+        Err(error) => match error {
+            Error::FileError(error) => match error.kind() {
+                // The path is either not found or invalid for the current config, return the 404 template
+                io::ErrorKind::NotFound => page_404(&config),
 
-            // For any other error, forward the error to the 500 Internal Error catcher
-            _ => PageResult::Err(error)
+                // For any other error, forward the error to the 500 Internal Error catcher
+                _ => PageResult::Err(())
+            }
+            _ => PageResult::Err(()),
         }
     }
 }
@@ -125,20 +124,22 @@ fn load_grid_url(path: &PathBuf) -> String {
     uri!(get_grid(path, None as Option<u32>, None as Option<u32>, None as Option<String>)).to_string()
 }
 
+
 /// Try to read and parse the config file
 /// In case of error, print it to stderr and exit with a status code of -1
 fn read_config_or_exit() -> Config {
     // Read the config file and parse it into a Config struct
     Config::read()
         .unwrap_or_else(|e| match e {
-            config::Error::FileError(e) => {
+            Error::FileError(e) => {
                 eprintln!("Error, unable to open the config file \"{}\" : {}", config::FILENAME, e);
                 std::process::exit(-1);
             }
-            config::Error::ParseError(e) => {
+            Error::ParseError(e) => {
                 eprintln!("Error, unable to parse the config file \"{}\" : {}", config::FILENAME, e);
                 std::process::exit(-1);
             }
+            _ => std::process::exit(-1),
         })
 }
 
@@ -162,7 +163,7 @@ fn open_db_or_exit(config: &Config) -> Connection {
         Ok(result) => result.unwrap_or_else(|| {
             // The main table doesn't exist, import the default schema to initialize the database
             print!("Database is empty, creating schema... ");
-            let schema = fs::read_to_string("schema.sql").unwrap_or_else(|error| {
+            let schema = std::fs::read_to_string("schema.sql").unwrap_or_else(|error| {
                 println!("");
                 eprintln!("Error, unable to open \"schema.sql\" : {}", error);
                 std::process::exit(-1);
@@ -182,4 +183,34 @@ fn open_db_or_exit(config: &Config) -> Connection {
     };
 
     db
+}
+
+
+/// Tri-state responder used by most routes
+#[derive(Responder)]
+pub enum PageResult {
+    Ok(Template),
+    #[response(status = 404)]
+    NotFound(Template),
+    #[response(status = 500)]
+    Err(()),
+}
+
+
+/// Generic error type used to uniformize errors across the crate
+#[derive(Debug)]
+pub enum Error {
+    FileError(io::Error),
+    ParseError(toml::de::Error),
+    DatabaseError(rusqlite::Error),
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::FileError(error) => write!(f, "file error : {}", error),
+            Error::ParseError(error) => write!(f, "parser error : {}", error),
+            Error::DatabaseError(error) => write!(f, "database error : {}", error),
+        }
+    }
 }
