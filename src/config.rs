@@ -1,88 +1,110 @@
 use rocket::serde::{Serialize, Deserialize};
+use std::fs;
+use std::io;
+
+pub const FILENAME: &'static str = "niobium.config";
+
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     #[serde(default="config_default_title")]
-    TITLE: String,
+    pub TITLE: String,
     
     #[serde(default)]
-    INSTAGRAM: String,
+    pub INSTAGRAM: String,
 
     #[serde(default="config_default_photos_dir")]
-    PHOTOS_DIR: String,
+    pub PHOTOS_DIR: String,
 
     #[serde(default="config_default_cache_dir")]
-    CACHE_DIR: String,
+    pub CACHE_DIR: String,
     
     #[serde(default="config_default_true")]
-    INDEX_SUBDIRS: bool,
+    pub INDEX_SUBDIRS: bool,
     
     #[serde(default="config_default_true")]
-    SHOW_PHOTOS_FROM_SUBDIRS: bool,
+    pub SHOW_PHOTOS_FROM_SUBDIRS: bool,
     
     #[serde(default="config_default_true")]
-    SHOW_NAVIGATION_PANEL: bool,
+    pub SHOW_NAVIGATION_PANEL: bool,
     
     #[serde(default="config_default_true")]
-    OPEN_NAVIGATION_PANEL_BY_DEFAULT: bool,
+    pub OPEN_NAVIGATION_PANEL_BY_DEFAULT: bool,
     
     #[serde(default="config_default_database_path")]
-    DATABASE_PATH: String,
+    pub DATABASE_PATH: String,
     
     #[serde(default="config_default_sort_order")]
-    SORT_ORDER: String,
+    pub SORT_ORDER: String,
     
     #[serde(default)]
-    REVERSE_SORT_ORDER: bool,
+    pub REVERSE_SORT_ORDER: bool,
     
     #[serde(default="config_default_row_height")]
-    DEFAULT_ROW_HEIGHT: u32,
+    pub DEFAULT_ROW_HEIGHT: u32,
     
     #[serde(default="config_default_max_zoom")]
-    MAX_ZOOM: u32,
+    pub MAX_ZOOM: u32,
     
     #[serde(default="config_default_row_height_step")]
-    ROW_HEIGHT_STEP: u32,
+    pub ROW_HEIGHT_STEP: u32,
     
     #[serde(default="config_default_true")]
-    SHOW_DOWNLOAD_BUTTON: bool,
+    pub SHOW_DOWNLOAD_BUTTON: bool,
     
     #[serde(default="config_default_slideshow_delay")]
-    SLIDESHOW_DELAY: u32,
+    pub SLIDESHOW_DELAY: u32,
     
     #[serde(default="config_default_thumbnail_max_size")]
-    THUMBNAIL_MAX_SIZE: u32,
+    pub THUMBNAIL_MAX_SIZE: u32,
     
     #[serde(default="config_default_thumbnail_quality")]
-    THUMBNAIL_QUALITY: u32,
+    pub THUMBNAIL_QUALITY: u32,
     
     #[serde(default="config_default_large_view_max_size")]
-    LARGE_VIEW_MAX_SIZE: u32,
+    pub LARGE_VIEW_MAX_SIZE: u32,
     
     #[serde(default="config_default_large_view_quality")]
-    LARGE_VIEW_QUALITY: u32,
+    pub LARGE_VIEW_QUALITY: u32,
     
     #[serde(default="config_default_true")]
-    READ_EXIF: bool,
+    pub READ_EXIF: bool,
     
     #[serde(default="config_default_true")]
-    SHOW_METADATA: bool,
+    pub SHOW_METADATA: bool,
     
     #[serde(default="config_default_true")]
-    METADATA_VISIBLE_BY_DEFAULT: bool,
+    pub METADATA_VISIBLE_BY_DEFAULT: bool,
     
     #[serde(default="config_default_dowload_prefix")]
-    DOWNLOAD_PREFIX: String,
+    pub DOWNLOAD_PREFIX: String,
     
     #[serde(default="config_default_true")]
-    BEHIND_REVERSE_PROXY: bool,
+    pub BEHIND_REVERSE_PROXY: bool,
     
     #[serde(default="config_default_uid_length")]
-    UID_LENGTH: u32,
+    pub UID_LENGTH: u32,
     
     #[serde(default)]
-    PASSWORD: String,
+    pub PASSWORD: String,
+}
+
+impl Config {
+    pub fn read() -> Result<Self, Error> {
+        Ok(toml::from_str(Self::read_as_string()?.as_str())
+            .map_err(|e| Error::ParseError(e))?)
+    }
+
+    pub fn read_as_value() -> Result<toml::Value, Error> {
+        Ok(Self::read_as_string()?.parse::<toml::Value>()
+            .map_err(|e| Error::ParseError(e))?)
+    }
+
+    fn read_as_string() -> Result<String, Error> {
+        fs::read_to_string(FILENAME)
+            .map_err(|e| Error::FileError(e))
+    }
 }
 
 
@@ -158,7 +180,13 @@ pub fn uid_chars() -> &'static str {
     "012345678901234567890123456789abcdefghijklmnopqrstuvwxyz" // Intentionally biased toward numbers
 }
 
-/// List of chars used when building an UID (set)
-pub fn uid_chars_set() -> &'static str {
-    "0123456789abcdefghijklmnopqrstuvwxyz"
+// /// List of chars used when building an UID (set)
+// pub fn uid_chars_set() -> &'static str {
+//     "0123456789abcdefghijklmnopqrstuvwxyz"
+// }
+
+
+pub enum Error {
+    FileError(io::Error),
+    ParseError(toml::de::Error),
 }
