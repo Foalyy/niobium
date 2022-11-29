@@ -1,13 +1,14 @@
 use crate::Error;
-use std::fs;
+use std::{fs, path::PathBuf};
 use std::path::Path;
 use rocket::serde::{Serialize, Deserialize};
+use toml::value::Table;
 
 pub const FILENAME: &'static str = "niobium.config";
 
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Config {
     #[serde(default="config_default_title")]
     pub TITLE: String,
@@ -89,6 +90,14 @@ pub struct Config {
     
     #[serde(default)]
     pub PASSWORD: String,
+
+    // Only for subdirs :
+    
+    #[serde(default="config_default_true")]
+    pub INDEX: bool,
+    
+    #[serde(default="config_default_true")]
+    pub HIDDEN: bool,
 }
 
 impl Config {
@@ -98,15 +107,44 @@ impl Config {
             .map_err(|e| Error::ParseError(e))?)
     }
 
-    pub fn read_as_value() -> Result<toml::Value, Error> {
-        Self::read_path_as_value(FILENAME)
+    /// Try to read and parse the config file
+    /// In case of error, print it to stderr and exit with a status code of -1
+    pub fn read_or_exit() -> Self {
+        // Read the config file and parse it into a Config struct
+        Self::read()
+            .unwrap_or_else(|e| match e {
+                Error::FileError(error, path) => {
+                    eprintln!("Error, unable to open the config file \"{}\" : {}", path.display(), error);
+                    std::process::exit(-1);
+                }
+                Error::ParseError(error) => {
+                    eprintln!("Error, unable to parse the config file \"{}\" : {}", FILENAME, error);
+                    std::process::exit(-1);
+                }
+                _ => std::process::exit(-1),
+            })
     }
+
+    // pub fn read_as_value() -> Result<toml::Value, Error> {
+    //     Self::read_path_as_value(FILENAME)
+    // }
+
+    pub fn read_as_table() -> Result<Table, Error> {
+        Self::read_path_as_table(FILENAME)
+    }
+
+    // pub fn read_path<P>(path: P) -> Result<Self, Error>
+    //     where P: AsRef<Path>
+    // {
+    //     Ok(toml::from_str(Self::read_path_as_string(path)?.as_str())
+    //         .map_err(|e| Error::ParseError(e))?)
+    // }
 
     pub fn read_path_as_string<P>(path: P) -> Result<String, Error>
         where P: AsRef<Path>
     {
-        fs::read_to_string(path)
-            .map_err(|e| Error::FileError(e))
+        fs::read_to_string(&path)
+            .map_err(|e| Error::FileError(e, PathBuf::from(path.as_ref())))
     }
 
     pub fn read_path_as_value<P>(path: P) -> Result<toml::Value, Error>
@@ -116,18 +154,34 @@ impl Config {
             .map_err(|e| Error::ParseError(e))?)
     }
 
-    pub fn update_with<'a>(value: &'a mut toml::Value, other: &toml::Value) -> &'a toml::Value {
-        if let Some(table) = value.as_table_mut() {
-            if let Some(other_table) = other.as_table() {
-                for entry in other_table.iter() {
-                    table.insert(entry.0.clone(), entry.1.clone());
-                }
-            }
-        }
-        value
+    pub fn read_path_as_table<P>(path: P) -> Result<Table, Error>
+        where P: AsRef<Path>
+    {
+        Ok(Self::read_path_as_value(path)?.try_into::<Table>()
+            .map_err(|e| Error::ParseError(e))?)
     }
 
-    pub fn from(value: toml::Value) -> Result<Self, toml::de::Error> {
+    // pub fn update_with_value<'a>(value: &'a mut toml::Value, other: &toml::Value) -> &'a toml::Value {
+    //     if let Some(table) = value.as_table_mut() {
+    //         if let Some(other_table) = other.as_table() {
+    //             Self::update_with(table, other_table);
+    //         }
+    //     }
+    //     value
+    // }
+
+    pub fn update_with<'a>(table: &'a mut Table, other_table: &Table) -> &'a Table {
+        for entry in other_table.iter() {
+            table.insert(entry.0.clone(), entry.1.clone());
+        }
+        table
+    }
+
+    pub fn from_table(table: Table) -> Result<Self, toml::de::Error> {
+        Self::from_value(toml::Value::Table(table))
+    }
+
+    pub fn from_value(value: toml::Value) -> Result<Self, toml::de::Error> {
         value.try_into::<Self>()
     }
 
@@ -199,14 +253,3 @@ fn config_default_dowload_prefix() -> String {
 fn config_default_uid_length() -> u32 {
     10 // Do not modify after the database has been generated
 }
-
-
-/// List of chars used when building an UID (biased)
-pub fn uid_chars() -> &'static str {
-    "012345678901234567890123456789abcdefghijklmnopqrstuvwxyz" // Intentionally biased toward numbers
-}
-
-// /// List of chars used when building an UID (set)
-// pub fn uid_chars_set() -> &'static str {
-//     "0123456789abcdefghijklmnopqrstuvwxyz"
-// }
