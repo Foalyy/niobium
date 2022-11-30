@@ -44,31 +44,31 @@ pub struct Config {
     pub REVERSE_SORT_ORDER: bool,
     
     #[serde(default="config_default_row_height")]
-    pub DEFAULT_ROW_HEIGHT: u32,
+    pub DEFAULT_ROW_HEIGHT: usize,
     
     #[serde(default="config_default_max_zoom")]
-    pub MAX_ZOOM: u32,
+    pub MAX_ZOOM: usize,
     
     #[serde(default="config_default_row_height_step")]
-    pub ROW_HEIGHT_STEP: u32,
+    pub ROW_HEIGHT_STEP: usize,
     
     #[serde(default="config_default_true")]
     pub SHOW_DOWNLOAD_BUTTON: bool,
     
     #[serde(default="config_default_slideshow_delay")]
-    pub SLIDESHOW_DELAY: u32,
+    pub SLIDESHOW_DELAY: usize,
     
     #[serde(default="config_default_thumbnail_max_size")]
-    pub THUMBNAIL_MAX_SIZE: u32,
+    pub THUMBNAIL_MAX_SIZE: usize,
     
     #[serde(default="config_default_thumbnail_quality")]
-    pub THUMBNAIL_QUALITY: u32,
+    pub THUMBNAIL_QUALITY: usize,
     
     #[serde(default="config_default_large_view_max_size")]
-    pub LARGE_VIEW_MAX_SIZE: u32,
+    pub LARGE_VIEW_MAX_SIZE: usize,
     
     #[serde(default="config_default_large_view_quality")]
-    pub LARGE_VIEW_QUALITY: u32,
+    pub LARGE_VIEW_QUALITY: usize,
     
     #[serde(default="config_default_true")]
     pub READ_EXIF: bool,
@@ -86,7 +86,7 @@ pub struct Config {
     pub BEHIND_REVERSE_PROXY: bool,
     
     #[serde(default="config_default_uid_length")]
-    pub UID_LENGTH: u32,
+    pub UID_LENGTH: usize,
     
     #[serde(default)]
     pub PASSWORD: String,
@@ -104,7 +104,7 @@ impl Config {
 
     pub fn read() -> Result<Self, Error> {
         Ok(toml::from_str(Self::read_path_as_string(FILENAME)?.as_str())
-            .map_err(|e| Error::ParseError(e))?)
+            .map_err(|e| Error::TomlParserError(e))?)
     }
 
     /// Try to read and parse the config file
@@ -117,7 +117,7 @@ impl Config {
                     eprintln!("Error, unable to open the config file \"{}\" : {}", path.display(), error);
                     std::process::exit(-1);
                 }
-                Error::ParseError(error) => {
+                Error::TomlParserError(error) => {
                     eprintln!("Error, unable to parse the config file \"{}\" : {}", FILENAME, error);
                     std::process::exit(-1);
                 }
@@ -151,14 +151,14 @@ impl Config {
         where P: AsRef<Path>
     {
         Ok(Self::read_path_as_string(path)?.parse::<toml::Value>()
-            .map_err(|e| Error::ParseError(e))?)
+            .map_err(|e| Error::TomlParserError(e))?)
     }
 
     pub fn read_path_as_table<P>(path: P) -> Result<Table, Error>
         where P: AsRef<Path>
     {
         Ok(Self::read_path_as_value(path)?.try_into::<Table>()
-            .map_err(|e| Error::ParseError(e))?)
+            .map_err(|e| Error::TomlParserError(e))?)
     }
 
     // pub fn update_with_value<'a>(value: &'a mut toml::Value, other: &toml::Value) -> &'a toml::Value {
@@ -214,35 +214,35 @@ fn config_default_sort_order() -> String {
     "filename".to_string()
 }
 
-fn config_default_row_height() -> u32 {
+fn config_default_row_height() -> usize {
     23 // vh
 }
 
-fn config_default_max_zoom() -> u32 {
+fn config_default_max_zoom() -> usize {
     2
 }
 
-fn config_default_row_height_step() -> u32 {
+fn config_default_row_height_step() -> usize {
     10 // %
 }
 
-fn config_default_slideshow_delay() -> u32 {
+fn config_default_slideshow_delay() -> usize {
     5000 // ms
 }
 
-fn config_default_thumbnail_max_size() -> u32 {
+fn config_default_thumbnail_max_size() -> usize {
     400 // px, on any side
 }
 
-fn config_default_thumbnail_quality() -> u32 {
+fn config_default_thumbnail_quality() -> usize {
     70 // %
 }
 
-fn config_default_large_view_max_size() -> u32 {
+fn config_default_large_view_max_size() -> usize {
     1920 // px, on any side
 }
 
-fn config_default_large_view_quality() -> u32 {
+fn config_default_large_view_quality() -> usize {
     85 // %
 }
 
@@ -250,6 +250,6 @@ fn config_default_dowload_prefix() -> String {
     "niobium_".to_string()
 }
 
-fn config_default_uid_length() -> u32 {
+fn config_default_uid_length() -> usize {
     10 // Do not modify after the database has been generated
 }

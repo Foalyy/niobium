@@ -116,7 +116,7 @@ pub async fn get_photos_in_paths(db_conn: &Mutex<Connection>, paths: &Vec<PathBu
 }
 
 
-/// Get the list of photos known in the database that are registered in the given path, ordered 
+/// Get the list of photos known in the database that are registered in the given path, ordered
 pub async fn get_photos_in_path(db_conn: &Mutex<Connection>, path: &PathBuf, sort_columns: &Vec<String>, reverse_sort_order: bool) -> Result<Vec<Photo>, Error> {
     let db_guard = db_conn.lock().await;
 
@@ -144,6 +144,24 @@ pub async fn get_photos_in_path(db_conn: &Mutex<Connection>, path: &PathBuf, sor
 }
 
 
+/// Get a single photo based on its UID
+pub async fn get_photo(db_conn: &Mutex<Connection>, uid: &str) -> Result<Option<Photo>, Error> {
+    let db_guard = db_conn.lock().await;
+
+    let sql = "SELECT * FROM photo WHERE uid=? LIMIT 1;";
+
+    let params = rusqlite::params![uid];
+    
+    let photo = db_guard.query_row(sql, params, |row|
+        Ok(row_to_photo(row)?)
+    )
+        .optional()
+        .map_err(|e| Error::DatabaseError(e))?;
+    
+    Ok(photo)
+}
+
+
 /// Insert a list of photos into the database
 pub async fn insert_photos(db_conn: &Mutex<Connection>, photos: &Vec<Photo>) -> Result<(), Error> {
     let db_guard = db_conn.lock().await;
@@ -156,7 +174,7 @@ pub async fn insert_photos(db_conn: &Mutex<Connection>, photos: &Vec<Photo>) -> 
     for photo in photos {
         let params = rusqlite::params![&photo.filename, &photo.path.to_str().unwrap(), &photo.uid, &photo.md5];
         stmt.execute(params)
-        .map_err(|e| Error::DatabaseError(e))?;
+            .map_err(|e| Error::DatabaseError(e))?;
     }
 
     stmt.finalize().map_err(|e| Error::DatabaseError(e))
@@ -174,7 +192,7 @@ pub async fn remove_photos(db_conn: &Mutex<Connection>, photos: &Vec<Photo>) -> 
     
     for photo in photos {
         stmt.execute(rusqlite::params![&photo.uid])
-        .map_err(|e| Error::DatabaseError(e))?;
+            .map_err(|e| Error::DatabaseError(e))?;
     }
 
     stmt.finalize().map_err(|e| Error::DatabaseError(e))
@@ -192,8 +210,67 @@ pub async fn move_photos(db_conn: &Mutex<Connection>, photos_pairs: &Vec<(Photo,
     
     for photos_pair in photos_pairs {
         stmt.execute(rusqlite::params![&photos_pair.1.filename, &photos_pair.1.path.to_str().unwrap(), &photos_pair.0.uid])
-        .map_err(|e| Error::DatabaseError(e))?;
+            .map_err(|e| Error::DatabaseError(e))?;
     }
+
+    stmt.finalize().map_err(|e| Error::DatabaseError(e))
+}
+
+
+/// Update a photo in the database based on its UID
+pub async fn update_photo(db_conn: &Mutex<Connection>, photo: &Photo) -> Result<(), Error> {
+    let db_guard = db_conn.lock().await;
+
+    let sql = "
+        UPDATE photo SET
+            filename=?,
+            path=?,
+            md5=?,
+            sort_order=?,
+            hidden=?,
+            metadata_parsed=?,
+            width=?,
+            height=?,
+            color=?,
+            title=?,
+            place=?,
+            date_taken=?,
+            camera_model=?,
+            lens_model=?,
+            focal_length=?,
+            aperture=?,
+            exposure_time=?,
+            sensitivity=?
+        WHERE uid=?;
+    ";
+
+    let mut stmt = db_guard.prepare(sql)
+        .map_err(|e| Error::DatabaseError(e))?;
+    
+    let params = rusqlite::params![
+        photo.filename,
+        photo.path.to_str().unwrap(),
+        photo.md5,
+        photo.sort_order,
+        photo.hidden,
+        photo.metadata_parsed,
+        photo.width,
+        photo.height,
+        photo.color,
+        photo.title,
+        photo.place,
+        photo.date_taken,
+        photo.camera_model,
+        photo.lens_model,
+        photo.focal_length,
+        photo.aperture,
+        photo.exposure_time,
+        photo.sensitivity,
+        photo.uid,
+    ];
+    
+    stmt.execute(params)
+        .map_err(|e| Error::DatabaseError(e))?;
 
     stmt.finalize().map_err(|e| Error::DatabaseError(e))
 }
@@ -217,7 +294,7 @@ fn row_to_photo(row: &Row) -> rusqlite::Result<Photo> {
         place: row.get(12)?,
         date_taken: row.get(13)?,
         camera_model: row.get(14)?,
-        lens_mode: row.get(15)?,
+        lens_model: row.get(15)?,
         focal_length: row.get(16)?,
         aperture: row.get(17)?,
         exposure_time: row.get(18)?,
