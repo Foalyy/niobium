@@ -106,7 +106,7 @@
     </div>
 
     <script>
-        const UID_LENGTH = {{ config.UID_LENGTH }};
+        const UID_LENGTH = {{ uid_length }};
         const UID_CHARS = '{{ uid_chars }}';
         const TITLE = '{{ config.TITLE }}';
         let loadGridURL = '{{ load_grid_url | safe }}';

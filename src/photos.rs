@@ -222,9 +222,10 @@ impl Photo {
 pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) -> Result<Vec<Photo>, Error> {
 
     // Inner function used to load photos recursively
-    fn _load<'a>(full_path: &'a PathBuf, rel_path: &'a PathBuf, db_conn: &'a Mutex<Connection>, main_config: &'a Config, subdir_config: &'a toml::value::Table, displayed_photos: &'a mut Vec<Photo>, photos_to_insert: &'a mut Option<&mut Vec<Photo>>,
+    fn _load<'a>(full_path: &'a PathBuf, rel_path: &'a PathBuf, db_conn: &'a Mutex<Connection>, main_config: &'a Config, subdir_config: &'a toml::value::Table, default_config: &'a Config, displayed_photos: &'a mut Vec<Photo>, photos_to_insert: &'a mut Option<&mut Vec<Photo>>,
             photos_to_remove: &'a mut Option<&mut Vec<Photo>>, paths_found: &'a mut Option<&mut Vec<PathBuf>>, is_subdir: bool) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>> {
         Box::pin(async move {
+            // True if this is the path actually requested by the user, not one of its subdirs opened recursively
             let is_requested_root = !is_subdir;
 
             // Append this path to the list of paths found
@@ -235,12 +236,19 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
             // Try to find a config file in this directory and append it to a copy of the current one (so it won't propagate to sibling directories)
             let parent_config = subdir_config.clone();
             let mut subdir_config = subdir_config.clone();
-            Config::update_with_subdir(&full_path, &mut subdir_config);
+            let this_subdir_config = Config::update_with_subdir(&full_path, &mut subdir_config);
 
             // HIDDEN only applies to subdirectories, and a HIDDEN=false doesn't override a parent HIDDEN=true
-            if (is_requested_root && subdir_config.contains_key("HIDDEN")) || parent_config.get("HIDDEN") == Some(&toml::value::Value::Boolean(true)) {
+            if is_requested_root && subdir_config.contains_key("HIDDEN") {
                 subdir_config.remove("HIDDEN");
-                println!("    update : subdir_config={:?}", subdir_config);
+            }
+            if is_subdir && parent_config.get("HIDDEN") == Some(&toml::value::Value::Boolean(true)) {
+                subdir_config.insert("HIDDEN".to_string(), toml::value::Value::Boolean(true));
+            }
+
+            // A SHOW_PHOTOS_FROM_SUBDIRS=false can't be overridden in a subdirectory
+            if is_subdir && parent_config.get("SHOW_PHOTOS_FROM_SUBDIRS") == Some(&toml::value::Value::Boolean(false)) {
+                subdir_config.insert("SHOW_PHOTOS_FROM_SUBDIRS".to_string(), toml::value::Value::Boolean(false));
             }
 
             // List the files inside this path in the photos directory
@@ -264,10 +272,9 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
             }
 
             // Get the list of photos saved in the database for this path exactly
-            let sort_columns = String::from(subdir_config.get("SORT_ORDER").and_then(|v| v.as_str()).unwrap_or("filename"))
+            let sort_columns = String::from(subdir_config.get("SORT_ORDER").and_then(|v| v.as_str()).unwrap_or(&default_config.SORT_ORDER))
                 .split(",").map(|s| String::from(s.trim())).collect::<Vec<String>>();
-            let reverse_sort_order = subdir_config.get("REVERSE_SORT_ORDER").and_then(|v| v.as_bool()).unwrap_or(false);
-            let photos_in_db = db::get_photos_in_path(db_conn, &rel_path, &sort_columns, reverse_sort_order).await?;
+            let photos_in_db = db::get_photos_in_path(db_conn, &rel_path, &sort_columns).await?;
 
             // Find photos in the filesystem that are not in the database yet
             if let Some(ref mut photos_to_insert) = photos_to_insert {
@@ -368,12 +375,13 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
             //   - the SHOW_PHOTOS_FROM_SUBDIRS config is enabled
             //   - this directory is not hidden
             //   - the password has been provided, if required
-            let show_photos_from_subdir = parent_config.get("SHOW_PHOTOS_FROM_SUBDIRS").and_then(|v| v.as_bool()).unwrap_or(true);
-            let hidden = subdir_config.get("HIDDEN").and_then(|v| v.as_bool()).unwrap_or(false);
+            let mut added_to_displayed_photos: Vec<Photo> = Vec::new();
+            let show_photos_from_subdir = parent_config.get("SHOW_PHOTOS_FROM_SUBDIRS").and_then(|v| v.as_bool()).unwrap_or(default_config.SHOW_PHOTOS_FROM_SUBDIRS);
+            let hidden = subdir_config.get("HIDDEN").and_then(|v| v.as_bool()).unwrap_or(default_config.HIDDEN);
             if is_requested_root || (show_photos_from_subdir && !hidden && is_password_ok) {
                 for photo in photos_in_db {
                     if !photo.hidden {
-                        displayed_photos.push(photo);
+                        added_to_displayed_photos.push(photo);
                     }
                 }
             }
@@ -419,10 +427,23 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
                         subdir_rel_path.push(&subdir);
                         let mut subdir_full_path = full_path.clone();
                         subdir_full_path.push(&subdir);
-                        _load(&subdir_full_path, &subdir_rel_path, db_conn, main_config, &subdir_config, displayed_photos, photos_to_insert, photos_to_remove, paths_found, true).await?;
+                        _load(&subdir_full_path, &subdir_rel_path, db_conn, main_config, &subdir_config, &default_config, &mut added_to_displayed_photos, photos_to_insert, photos_to_remove, paths_found, true).await?;
                     }
                 }
             }
+
+            // Reverse the photos sort order if enabled in the config for this subdir
+            let mut reverse_sort_order = this_subdir_config.and_then(|v| v.get("REVERSE_SORT_ORDER").and_then(|v| v.as_bool()));
+            if reverse_sort_order == None && rel_path == &PathBuf::from("") {
+                // If this is the root photos directory and the setting is not defined, use the value from the main config
+                reverse_sort_order = Some(main_config.REVERSE_SORT_ORDER);
+            }
+            if reverse_sort_order.unwrap_or(default_config.REVERSE_SORT_ORDER) {
+                added_to_displayed_photos.reverse();
+            }
+
+            // Add these photos
+            displayed_photos.append(&mut added_to_displayed_photos);
 
             Ok(())
         })
@@ -443,6 +464,9 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
             }
             Err(error)
         })?;
+    
+    // Create a default config to use as a reference for default value of settings
+    let default_config = Config::default();
 
     // Make sure the requested path is valid and if so, convert it to the full path on the file system
     let full_path = check_path(&path, &config)?;
@@ -460,7 +484,7 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
     let mut photos_to_insert: Vec<Photo> = Vec::new();
     let mut photos_to_remove: Vec<Photo> = Vec::new();
     let mut paths_found: Vec<PathBuf> = Vec::new();
-    _load(&full_path, &path, db_conn, &config, &subdir_config, &mut displayed_photos, &mut Some(&mut photos_to_insert), 
+    _load(&full_path, &path, db_conn, &config, &subdir_config, &default_config, &mut displayed_photos, &mut Some(&mut photos_to_insert), 
     &mut Some(&mut photos_to_remove), &mut Some(&mut paths_found), false).await?;
 
     // Get the list of all known subdirs of the current path in the database, check if some have been removed,
@@ -561,10 +585,11 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
     // If there were some modifications to the photos, reload the database after updating it
     if !photos_to_insert.is_empty() || !photos_to_remove.is_empty() || !photos_to_move.is_empty() {
         displayed_photos.clear();
-        _load(&full_path, &path, db_conn, &config, &subdir_config, &mut displayed_photos, &mut None,
+        _load(&full_path, &path, db_conn, &config, &subdir_config, &default_config, &mut displayed_photos, &mut None,
             &mut None, &mut None, false).await?;
     }
 
+    // Add an index to each photo
     for (index, photo) in displayed_photos.iter_mut().enumerate() {
         photo.index = index as u32;
     }

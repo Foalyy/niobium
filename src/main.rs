@@ -66,6 +66,7 @@ async fn get_gallery(path: PathBuf, config: &State<Config>) -> PageResult {
                     config: config.inner(),
                     nav: nav_data,
                     uid_chars: UID::CHARS,
+                    uid_length: UID::LENGTH,
                     load_grid_url: uri!(get_grid(&path, None as Option<usize>, None as Option<usize>, None as Option<UID>)).to_string(),
                     load_nav_url: uri!(get_nav(&path)).to_string(),
                 })),

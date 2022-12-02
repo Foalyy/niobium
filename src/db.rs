@@ -117,12 +117,12 @@ pub async fn get_photos_in_paths(db_conn: &Mutex<Connection>, paths: &Vec<PathBu
 
 
 /// Get the list of photos known in the database that are registered in the given path, ordered
-pub async fn get_photos_in_path(db_conn: &Mutex<Connection>, path: &PathBuf, sort_columns: &Vec<String>, reverse_sort_order: bool) -> Result<Vec<Photo>, Error> {
+pub async fn get_photos_in_path(db_conn: &Mutex<Connection>, path: &PathBuf, sort_columns: &Vec<String>) -> Result<Vec<Photo>, Error> {
     let db_guard = db_conn.lock().await;
 
     let mut sql = "SELECT * FROM photo WHERE path=? ORDER BY ".to_string();
     sql += sort_columns.iter()
-        .map(|clause| clause.clone() + if reverse_sort_order { " DESC" } else { " ASC"})
+        .map(|clause| clause.clone() + " ASC")
         .collect::<Vec<String>>()
         .join(", ")
         .as_str();

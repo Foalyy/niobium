@@ -181,6 +181,13 @@ pub struct Config {
 
 impl Config {
 
+    /// Return a Config struct with default values
+    pub fn default() -> Config {
+        Self {
+            ..Default::default()
+        }
+    }
+
     /// Deserialize a TOML Table into a Config struct
     pub fn from_table(table: Table) -> Result<Self, toml::de::Error> {
         Self::from_value(toml::Value::Table(table))
@@ -267,7 +274,7 @@ impl Config {
     //     value
     // }
 
-    /// Update in place the given TOML Table by replacing its keys with the ones found in `other_table`
+    /// Update in place the given TOML Table by replacing its keys with the ones found in `other_tabl²e`
     pub fn update_with<'a>(table: &'a mut Table, other_table: &Table) -> &'a Table {
         for entry in other_table.iter() {
             table.insert(entry.0.clone(), entry.1.clone());
@@ -275,8 +282,9 @@ impl Config {
         table
     }
 
-    /// Merge the subdir config file in the given path (if this file exists) into the given config
-    pub fn update_with_subdir(full_path: &PathBuf, into_value: &mut Table) -> bool {
+    /// Merge the subdir config file in the given path (if this file exists) into the given config, and
+    /// return the local config found if any
+    pub fn update_with_subdir(full_path: &PathBuf, into_value: &mut Table) -> Option<Table> {
         // Check if the config file exists
         let mut subdir_config_path = PathBuf::from(&full_path);
         subdir_config_path.push(".niobium.config");
@@ -286,15 +294,16 @@ impl Config {
                 Ok(value) => {
                     // Update the current config with the content of this one
                     Config::update_with(into_value, &value);
+                    Some(value)
                 }
                 Err(error) => {
                     // Log the error and continue
                     eprintln!("Warning: unable to read local config file \"{}\" : {}", subdir_config_path.display(), error);
-                },
-            };
-            true
+                    None
+                }
+            }
         } else {
-            false
+            None
         }
     }
 
