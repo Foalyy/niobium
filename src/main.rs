@@ -11,6 +11,7 @@ use nav_data::NavData;
 use uid::UID;
 use rocket::fs::NamedFile;
 use rocket::http::Header;
+use std::net::IpAddr;
 use std::{io, fmt::Display};
 use std::path::{PathBuf, Path};
 use rocket::{fs::FileServer, State, tokio::sync::Mutex};
@@ -24,6 +25,14 @@ async fn rocket() -> _ {
     // Try to read the config file
     let config = Config::read_or_exit();
 
+    // Send some of the settings to Rocket
+    let figment = rocket::Config::figment()
+        .merge(("address", config.ADDRESS.parse::<IpAddr>().map_err(|e| {
+            eprintln!("Error : invalid value for ADDRESS in {} : {}", config::FILENAME, e);
+            std::process::exit(-1);
+        }).unwrap()))
+        .merge(("port", config.PORT));
+
     // Try to open a connection to the SQLite database
     let db_conn = Mutex::new(db::open_or_exit(&config));
 
@@ -36,7 +45,7 @@ async fn rocket() -> _ {
         });
 
     // Let's go to spaaace !
-    rocket::build()
+    rocket::custom(figment)
         .mount("/", routes![
             get_gallery,
             get_grid,

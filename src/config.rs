@@ -13,6 +13,16 @@ pub const FILENAME: &'static str = "niobium.config";
 #[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Config {
+    /// IP address to serve on.
+    /// Default : 127.0.0.1
+    #[serde(default="config_default_address")]
+    pub ADDRESS: String,
+   
+    /// Port to serve on.
+    /// Default : 8000
+    #[serde(default="config_default_port")]
+    pub PORT: u16,
+    
     /// Title displayed in the page title and the top of the navigation panel.
     #[serde(default="config_default_title")]
     pub TITLE: String,
@@ -311,6 +321,14 @@ impl Config {
 
 
 // Default values for config keys
+
+fn config_default_address() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn config_default_port() -> u16 {
+    8000
+}
 
 fn config_default_title() -> String {
     "Niobium".to_string()
