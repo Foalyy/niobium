@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::{config::Config, Error, photos::Photo};
+use crate::{config::Config, Error, photos::Photo, uid::UID};
 use rocket::tokio::sync::Mutex;
 use rusqlite::{Connection, OptionalExtension, Row};
 
@@ -16,7 +16,7 @@ pub fn open_or_exit(config: &Config) -> Connection {
             std::process::exit(-1);
     });
 
-    // Check if the main 'photos' table exist, and if not, try to create it
+    // Check if the main 'photo' table exist, and if not, try to create it
     match db_conn.query_row(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='photo';",
         [], |row| row.get::<_, String>(0)
@@ -48,7 +48,7 @@ pub fn open_or_exit(config: &Config) -> Connection {
 
 
 /// Get the list of UIDs that exist in the database
-pub async fn get_existing_uids(db_conn: &Mutex<Connection>) -> Result<Vec<String>, Error> {
+pub async fn get_existing_uids(db_conn: &Mutex<Connection>) -> Result<Vec<UID>, Error> {
     let db_guard = db_conn.lock().await;
 
     let sql = "SELECT uid FROM photo;";
@@ -59,7 +59,7 @@ pub async fn get_existing_uids(db_conn: &Mutex<Connection>) -> Result<Vec<String
     let uids = stmt.query_map([], |row| row.get(0))
         .map_err(|e| Error::DatabaseError(e))?
         .map(|x| x.unwrap())
-        .collect::<Vec<String>>();
+        .collect::<Vec<UID>>();
     
     Ok(uids)
 }
@@ -145,7 +145,7 @@ pub async fn get_photos_in_path(db_conn: &Mutex<Connection>, path: &PathBuf, sor
 
 
 /// Get a single photo based on its UID
-pub async fn get_photo(db_conn: &Mutex<Connection>, uid: &str) -> Result<Option<Photo>, Error> {
+pub async fn get_photo(db_conn: &Mutex<Connection>, uid: &UID) -> Result<Option<Photo>, Error> {
     let db_guard = db_conn.lock().await;
 
     let sql = "SELECT * FROM photo WHERE uid=? LIMIT 1;";

@@ -1,6 +1,6 @@
 {% extends "layout" %}
 
-{% block title %}{% if not nav.is_root %}{{ nav.path_split | slice(end=-1) }} - {% endif %}{% endblock %}
+{% block title %}{% if not nav.is_root %}{{ nav.current_open }} - {% endif %}{% endblock %}
 
 {% block head %}
     <style>

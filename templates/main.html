@@ -109,8 +109,8 @@
         const UID_LENGTH = {{ config.UID_LENGTH }};
         const UID_CHARS = '{{ uid_chars }}';
         const TITLE = '{{ config.TITLE }}';
-        let loadGridURL = '{{ url_for('get_grid', path=nav.path_current[:-1]) }}';
-        let loadNavURL = '{{ url_for('get_nav', path=nav.path_current[:-1]) }}';
+        let loadGridURL = '{{ url_for('get_gallery', path=nav.path_current[:-1]) }}?grid';
+        let loadNavURL = '{{ url_for('get_gallery', path=nav.path_current[:-1]) }}?nav';
         let rowHeight = {{ config.DEFAULT_ROW_HEIGHT }};
         let rowHeightStep = {{ config.ROW_HEIGHT_STEP }};
         let slideshowDelay = {{ config.SLIDESHOW_DELAY }};

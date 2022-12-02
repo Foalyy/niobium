@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::uid::UID;
 use crate::{Error, db};
 use std::future::Future;
 use std::io::{self, Write};
@@ -7,8 +8,6 @@ use std::pin::Pin;
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use md5::{Md5, Digest};
-use rand::seq::SliceRandom;
-use rand::thread_rng;
 use rocket::serde::Serialize;
 use rocket::tokio::fs::create_dir_all;
 use rocket::tokio::time::Instant;
@@ -18,12 +17,14 @@ use tokio_stream::wrappers::ReadDirStream;
 use rusqlite::Connection;
 use toml::value::Table;
 
+
+
 #[derive(Default, Serialize, Clone, Debug)]
 pub struct Photo {
     pub id: u32,
     pub filename: String,
     pub path: PathBuf,
-    pub uid: String,
+    pub uid: UID,
     pub md5: String,
     pub sort_order: u32,
     pub hidden: bool,
@@ -45,13 +46,176 @@ pub struct Photo {
 }
 
 impl Photo {
+    /// Return the full path to this photo file
     pub fn full_path(&self, config: &Config) -> PathBuf {
         let mut full_path = PathBuf::from(&config.PHOTOS_DIR);
         full_path.push(&self.path);
         full_path.push(&self.filename);
         full_path
     }
+
+    /// Try to open the photo file to extract its metadata and store them in the database.
+    /// If this has already been done according to the `metadata_parsed` field, this is a no-op.
+    pub async fn parse_metadata(&mut self, config: &Config, db_conn: &Mutex<Connection>) -> Result<(), Error> {
+        if self.metadata_parsed {
+            // Metadata already parsed, nothing to do
+            return Ok(());
+        }
+
+        // Load the image
+        let file_path = self.full_path(config);
+        println!("Parsing metadata for photo {}...", file_path.display());
+        let img = image::io::Reader::open(&file_path)
+            .map_err(|e| Error::FileError(e, file_path.clone()))?
+            .decode()
+            .map_err(|e| Error::ImageError(e, file_path.clone()))?;
+
+        // Image dimensions
+        self.width = img.width();
+        self.height = img.height();
+
+        // Compute the photo's average color
+        let img_rgb8 = match img {
+            image::DynamicImage::ImageRgb8(pixels) => pixels,
+            _ => {
+                println!("Warning : converting \"{}\" from {:?} to RGB8, this is not efficient", file_path.display(), img.color());
+                img.into_rgb8()
+            }
+        };
+        let pixels = img_rgb8.as_flat_samples().samples;
+        let mut average_r: u64 = 0;
+        let mut average_g: u64 = 0;
+        let mut average_b: u64 = 0;
+        let n_pixels = pixels.len() / 3;
+        for i in 0..n_pixels {
+            let offset = i * 3;
+            average_r += pixels[offset + 0] as u64;
+            average_g += pixels[offset + 1] as u64;
+            average_b += pixels[offset + 2] as u64;
+        }
+        average_r /= n_pixels as u64;
+        average_g /= n_pixels as u64;
+        average_b /= n_pixels as u64;
+        let darken_factor = 6;
+        self.color = format!("{:02x}{:02x}{:02x}", average_r / darken_factor, average_g / darken_factor, average_b / darken_factor);
+
+        // Parse EXIF metadata
+        if config.READ_EXIF {
+            if let Err(Error::EXIFParserError(error, _)) = self.parse_exif(config) {
+                match error {
+                    exif::Error::NotFound(_) => (), // Ignore
+                    _ => eprintln!("Warning, unable to parse EXIF data from \"{}\" : {}", file_path.display(), error),
+                }
+            }
+        }
+
+        self.metadata_parsed = true;
+        db::update_photo(db_conn, &self).await
+    }
+
+    /// Try to parse exif metadata
+    pub fn parse_exif(&mut self, config: &Config) -> Result<(), Error> {
+        fn remove_quotes(value: String) -> String {
+            let mut value = value.clone();
+            if value.starts_with("\"") {
+                value.remove(0);
+            }
+            if value.ends_with("\"") {
+                value.pop();
+            }
+            value
+        }
+
+        let file_path = self.full_path(config);
+
+        // Read the EXIF data from the file
+        let exif_file = std::fs::File::open(&file_path)
+            .map_err(|e| Error::FileError(e, file_path.clone()))?;
+        let mut buf_reader = std::io::BufReader::new(&exif_file);
+        let exif_reader = exif::Reader::new();
+        let exif = exif_reader.read_from_container(&mut buf_reader)
+            .map_err(|e| Error::EXIFParserError(e, file_path.clone()))?;
+        
+        // Add every relevant available fields to the photo object
+        if let Some(field) = exif.get_field(exif::Tag::DateTimeDigitized, exif::In::PRIMARY) {
+            self.date_taken = remove_quotes(format!("{}", field.display_value()));
+        }
+        if let Some(field) = exif.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY) {
+            self.date_taken = remove_quotes(format!("{}", field.display_value()));
+        }
+        if let Some(field) = exif.get_field(exif::Tag::Model, exif::In::PRIMARY) {
+            self.camera_model = remove_quotes(format!("{}", field.display_value()));
+        }
+        if let Some(field) = exif.get_field(exif::Tag::LensModel, exif::In::PRIMARY) {
+            self.lens_model = remove_quotes(format!("{}", field.display_value()));
+        }
+        if let Some(field) = exif.get_field(exif::Tag::FocalLength, exif::In::PRIMARY) {
+            self.focal_length = remove_quotes(format!("{}", field.display_value()));
+        }
+        if let Some(field) = exif.get_field(exif::Tag::FNumber, exif::In::PRIMARY) {
+            self.aperture = remove_quotes(format!("{}", field.display_value()));
+        }
+        if let Some(field) = exif.get_field(exif::Tag::ExposureTime, exif::In::PRIMARY) {
+            self.exposure_time = remove_quotes(format!("{}", field.display_value()));
+        }
+        if let Some(field) = exif.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY) {
+            self.sensitivity = remove_quotes(format!("{}", field.display_value()));
+        }
+
+        Ok(())
+    }
+
+    /// Create a resized version of this photo in the cache folder
+    async fn create_resized(&self, resized_file_path: &PathBuf, resized_type: ResizedType, config: &Config) -> Result<(), Error> {
+        // Extract parameter from the config
+        let file_path = self.full_path(config);
+        let max_size = resized_type.max_size(config);
+        let quality = resized_type.quality(config);
+        println!("Generating resized version ({}, max {}x{}, quality {}%) of \"{}\" in the cache directory... ",
+            resized_type.prefix(),
+            max_size, max_size, quality,
+            file_path.display()
+        );
+    
+        // Make sure the directory exists in the cache folder
+        let cache_dir = PathBuf::from(&config.CACHE_DIR);
+        let dir_path = PathBuf::from(resized_file_path.parent().unwrap_or_else(|| &cache_dir));
+        if !dir_path.is_dir() {
+            create_dir_all(&dir_path).await
+                .map_err(|e| {
+                    eprintln!("Error : unable to create a directory in the cache folder : {}", dir_path.display());
+                    Error::FileError(e, dir_path.clone())
+                })?;
+        }
+    
+        // Load the image
+        let img = image::io::Reader::open(&file_path)
+            .map_err(|e| Error::FileError(e, file_path.clone()))?
+            .decode()
+            .map_err(|e| {
+                eprintln!("Error : unable to decode photo at \"{}\" : {}", file_path.display(), e);
+                Error::ImageError(e, file_path.clone())
+            })?;
+        
+        // Resize this image
+        let img_resized = img.resize(max_size as u32, max_size as u32, FilterType::CatmullRom);
+    
+        // Create the JPEG encoder with the configured quality
+        // Note that this uses the standard fs API, as opposed to tokio's async API, because the encoder is not compatible
+        // the async equivalent of Writer
+        let file = std::fs::File::create(resized_file_path)
+            .map_err(|e| Error::FileError(e, resized_file_path.clone()))?;
+        let writer = std::io::BufWriter::new(file);
+        let mut encoder = JpegEncoder::new_with_quality(writer, quality.try_into().unwrap());
+        
+        // Encode the image
+        encoder.encode_image(&img_resized)
+            .map_err(|e| Error::ImageError(e, file_path.clone()))?;
+        
+        Ok(())
+    }
 }
+
 
 
 /// Load all available photos in the photos folder and sync them with the database
@@ -71,7 +235,7 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
             // Try to find a config file in this directory and append it to a copy of the current one (so it won't propagate to sibling directories)
             let parent_config = subdir_config.clone();
             let mut subdir_config = subdir_config.clone();
-            merge_subdir_config(&full_path, &mut subdir_config);
+            Config::update_with_subdir(&full_path, &mut subdir_config);
 
             // HIDDEN only applies to subdirectories, and a HIDDEN=false doesn't override a parent HIDDEN=true
             if (is_requested_root && subdir_config.contains_key("HIDDEN")) || parent_config.get("HIDDEN") == Some(&toml::value::Value::Boolean(true)) {
@@ -130,7 +294,7 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
 
             // Delete old resized photos from cache
             let mut resized_photos_to_delete: Vec<String> = Vec::new();
-            let all_uids_in_path = photos_in_db.iter().map(|photo| &photo.uid).collect::<Vec<&String>>();
+            let all_uids_in_path = photos_in_db.iter().map(|photo| &photo.uid).collect::<Vec<&UID>>();
             let suffix = ".jpg";
             let mut cache_path = PathBuf::from(&main_config.CACHE_DIR);
             cache_path.push(rel_path);
@@ -147,11 +311,13 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
                                     // Check if this is a jpeg file with a known prefix
                                     if file_type.is_file() && filename_lowercase.starts_with(prefix) && filename_lowercase.ends_with(suffix) {
                                         // Extract the UID from the filename
-                                        let file_uid: String = filename.chars().skip(prefix.len()).take(filename.len() - prefix.len() - suffix.len()).collect();
-                                        if !all_uids_in_path.contains(&&file_uid) {
-                                            // This UID is not in the database anymore for this path, add it to the 'to remove' list
-                                            resized_photos_to_delete.push(filename);
-                                            break;
+                                        let file_uid = UID::try_from(&filename.chars().skip(prefix.len()).take(filename.len() - prefix.len() - suffix.len()).collect::<String>());
+                                        if let Ok(file_uid) = file_uid {
+                                            if !all_uids_in_path.contains(&&file_uid) {
+                                                // This UID is not in the database anymore for this path, add it to the 'to remove' list
+                                                resized_photos_to_delete.push(filename);
+                                                break;
+                                            }
                                         }
                                     }
                                 }
@@ -352,7 +518,7 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
     if !photos_to_insert.is_empty() {
         // Generate a new UID for these photos
         for photo in photos_to_insert.iter_mut() {
-            photo.uid = generate_uid(&existing_uids, config.UID_LENGTH);
+            photo.uid = UID::new(&existing_uids);
             existing_uids.push(photo.uid.clone());
         }
 
@@ -408,16 +574,19 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
 
 
 /// Load a single photo from the database
-pub async fn get_from_uid(uid: &str, config: &Config, db_conn: &Mutex<Connection>) -> Result<Option<Photo>, Error> {
+pub async fn get_from_uid(uid: &UID, config: &Config, db_conn: &Mutex<Connection>) -> Result<Option<Photo>, Error> {
     // Get the photo associated to this uid
-    let photo = db::get_photo(db_conn, &uid).await;
+    let photo = db::get_photo(db_conn, uid).await;
 
     match photo {
-        Ok(Some(mut photo)) => match parse_metadata(&mut photo, config, db_conn).await {
-            Ok(_) => Ok(Some(photo)),
-            Err(error) => {
-                eprintln!("Error : unable to parse metadata of photo #{} : {}", &uid, &error);
-                Err(error)
+        Ok(Some(mut photo)) => {
+            // This photo exists, try to parse its metadata if not done already
+            match photo.parse_metadata(config, db_conn).await {
+                Ok(_) => Ok(Some(photo)),
+                Err(error) => {
+                    eprintln!("Error : unable to parse metadata of photo #{} : {}", &uid, &error);
+                    Err(error)
+                }
             }
         }
         Ok(None) => Ok(None),
@@ -431,7 +600,7 @@ pub async fn get_from_uid(uid: &str, config: &Config, db_conn: &Mutex<Connection
 
 /// Load a single photo from the database and return the path to its resized version,
 /// after generating it if necessary
-pub async fn get_resized_from_uid(uid: &str, resized_type: ResizedType, config: &Config, db_conn: &Mutex<Connection>) -> Result<Option<(Photo, PathBuf)>, Error> {
+pub async fn get_resized_from_uid(uid: &UID, resized_type: ResizedType, config: &Config, db_conn: &Mutex<Connection>) -> Result<Option<(Photo, PathBuf)>, Error> {
     match get_from_uid(uid, config, db_conn).await? {
         Some(photo) => {
             // Path of the resized version of this photo in the cache folder
@@ -441,159 +610,13 @@ pub async fn get_resized_from_uid(uid: &str, resized_type: ResizedType, config: 
 
             // Generate this file if it doesn't exist
             if !resized_file_path.is_file() {
-                resize_photo(&photo, &resized_file_path, resized_type, config).await?;
+                photo.create_resized(&resized_file_path, resized_type, config).await?;
             }
 
             Ok(Some((photo, resized_file_path)))
         },
         None => Ok(None),
     }
-}
-
-
-pub async fn parse_metadata(photo: &mut Photo, config: &Config, db_conn: &Mutex<Connection>) -> Result<(), Error> {
-    if photo.metadata_parsed {
-        // Metadata already parsed, nothing to do
-        return Ok(());
-    }
-
-    // Load the image
-    let file_path = photo.full_path(config);
-    println!("Parsing metadata for photo {}...", file_path.display());
-    let img = image::io::Reader::open(&file_path)
-        .map_err(|e| Error::FileError(e, file_path.clone()))?
-        .decode()
-        .map_err(|e| Error::ImageError(e, file_path.clone()))?;
-
-    // Image dimensions
-    photo.width = img.width();
-    photo.height = img.height();
-
-    // Compute the photo's average color
-    let img_rgb8 = match img {
-        image::DynamicImage::ImageRgb8(pixels) => pixels,
-        _ => {
-            println!("Warning : converting \"{}\" from {:?} to RGB8, this is not efficient", file_path.display(), img.color());
-            img.into_rgb8()
-        }
-    };
-    let pixels = img_rgb8.as_flat_samples().samples;
-    let mut average_r: u64 = 0;
-    let mut average_g: u64 = 0;
-    let mut average_b: u64 = 0;
-    let n_pixels = pixels.len() / 3;
-    for i in 0..n_pixels {
-        let offset = i * 3;
-        average_r += pixels[offset + 0] as u64;
-        average_g += pixels[offset + 1] as u64;
-        average_b += pixels[offset + 2] as u64;
-    }
-    average_r /= n_pixels as u64;
-    average_g /= n_pixels as u64;
-    average_b /= n_pixels as u64;
-    let darken_factor = 6;
-    photo.color = format!("{:02x}{:02x}{:02x}", average_r / darken_factor, average_g / darken_factor, average_b / darken_factor);
-
-    // Parse EXIF metadata
-    if config.READ_EXIF {
-        fn remove_quotes(value: String) -> String {
-            let mut value = value.clone();
-            if value.starts_with("\"") {
-                value.remove(0);
-            }
-            if value.ends_with("\"") {
-                value.pop();
-            }
-            value
-        }
-
-        // Read the EXIF data from the file
-        let exif_file = std::fs::File::open(&file_path)
-            .map_err(|e| Error::FileError(e, file_path.clone()))?;
-        let mut buf_reader = std::io::BufReader::new(&exif_file);
-        let exif_reader = exif::Reader::new();
-        let exif = exif_reader.read_from_container(&mut buf_reader)
-            .map_err(|e| Error::EXIFParserError(e, file_path.clone()))?;
-        
-        // Add every relevant available fields to the photo object
-        if let Some(field) = exif.get_field(exif::Tag::DateTimeDigitized, exif::In::PRIMARY) {
-            photo.date_taken = remove_quotes(format!("{}", field.display_value()));
-        }
-        if let Some(field) = exif.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY) {
-            photo.date_taken = remove_quotes(format!("{}", field.display_value()));
-        }
-        if let Some(field) = exif.get_field(exif::Tag::Model, exif::In::PRIMARY) {
-            photo.camera_model = remove_quotes(format!("{}", field.display_value()));
-        }
-        if let Some(field) = exif.get_field(exif::Tag::LensModel, exif::In::PRIMARY) {
-            photo.lens_model = remove_quotes(format!("{}", field.display_value()));
-        }
-        if let Some(field) = exif.get_field(exif::Tag::FocalLength, exif::In::PRIMARY) {
-            photo.focal_length = remove_quotes(format!("{}", field.display_value()));
-        }
-        if let Some(field) = exif.get_field(exif::Tag::FNumber, exif::In::PRIMARY) {
-            photo.aperture = remove_quotes(format!("{}", field.display_value()));
-        }
-        if let Some(field) = exif.get_field(exif::Tag::ExposureTime, exif::In::PRIMARY) {
-            photo.exposure_time = remove_quotes(format!("{}", field.display_value()));
-        }
-        if let Some(field) = exif.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY) {
-            photo.sensitivity = remove_quotes(format!("{}", field.display_value()));
-        }
-    }
-
-    photo.metadata_parsed = true;
-    db::update_photo(db_conn, &photo).await
-}
-
-
-async fn resize_photo(photo: &Photo, resized_file_path: &PathBuf, resized_type: ResizedType, config: &Config) -> Result<(), Error> {
-    // Extract parameter from the config
-    let file_path = photo.full_path(config);
-    let max_size = resized_type.max_size(config);
-    let quality = resized_type.quality(config);
-    println!("Generating resized version ({}, max {}x{}, quality {}%) of \"{}\" in the cache directory... ",
-        resized_type.prefix(),
-        max_size, max_size, quality,
-        file_path.display()
-    );
-
-    // Make sure the directory exists in the cache folder
-    let cache_dir = PathBuf::from(&config.CACHE_DIR);
-    let dir_path = PathBuf::from(resized_file_path.parent().unwrap_or_else(|| &cache_dir));
-    if !dir_path.is_dir() {
-        create_dir_all(&dir_path).await
-            .map_err(|e| {
-                eprintln!("Error : unable to create a directory in the cache folder : {}", dir_path.display());
-                Error::FileError(e, dir_path.clone())
-            })?;
-    }
-
-    // Load the image
-    let img = image::io::Reader::open(&file_path)
-        .map_err(|e| Error::FileError(e, file_path.clone()))?
-        .decode()
-        .map_err(|e| {
-            eprintln!("Error : unable to decode photo at \"{}\" : {}", file_path.display(), e);
-            Error::ImageError(e, file_path.clone())
-        })?;
-    
-    // Resize this image
-    let img_resized = img.resize(max_size as u32, max_size as u32, FilterType::CatmullRom);
-
-    // Create the JPEG encoder with the configured quality
-    // Note that this used the standard fs API, as opposed to tokio's async API, because the encoder is not compatible
-    // the async equivalent of Writer
-    let file = std::fs::File::create(resized_file_path)
-        .map_err(|e| Error::FileError(e, resized_file_path.clone()))?;
-    let writer = std::io::BufWriter::new(file);
-    let mut encoder = JpegEncoder::new_with_quality(writer, quality.try_into().unwrap());
-    
-    // Encode the image
-    encoder.encode_image(&img_resized)
-        .map_err(|e| Error::ImageError(e, file_path.clone()))?;
-    
-    Ok(())
 }
 
 
@@ -619,18 +642,15 @@ async fn check_config_dir(path: &PathBuf) -> Result<(), Error> {
             }
         },
 
-        Err(error) => {
-            if error.kind() == io::ErrorKind::NotFound {
-                // The directory doesn't exist, try to create it and return the result
-                // of that operation directly
-                println!("Creating empty directory \"{}\"", path.display());
-                fs::create_dir_all(path).await.map_err(|e| Error::FileError(e, path.clone()))
+        // The directory doesn't exist, try to create it and return the result
+        // of that operation directly
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            println!("Creating empty directory \"{}\"", path.display());
+            fs::create_dir_all(path).await.map_err(|e| Error::FileError(e, path.clone()))
+        }
 
-            } else {
-                // Another error happened, return it directly
-                Err(Error::FileError(error, path.clone()))
-            }
-        },
+        // Return any other error directly
+        Err(error) => Err(Error::FileError(error, path.clone())),
     }
 }
 
@@ -667,42 +687,18 @@ fn get_subdir_config(photos_path: &PathBuf, path: &PathBuf) -> Result<toml::valu
 
     // From the photos directory, explore every subdir in the given path
     let mut current_path = PathBuf::from(photos_path);
-    merge_subdir_config(&current_path, &mut subdir_config_table);
+    Config::update_with_subdir(&current_path, &mut subdir_config_table);
     for component in path.components() {
         current_path.push(&component);
-        merge_subdir_config(&current_path, &mut subdir_config_table);
+        Config::update_with_subdir(&current_path, &mut subdir_config_table);
     }
 
     Ok(subdir_config_table)
 }
 
 
-/// Merge the subdir config file in the given path (if this file exists) into the given config
-fn merge_subdir_config(full_path: &PathBuf, into_value: &mut toml::value::Table) -> bool {
-    // Check if the config file exists
-    let mut subdir_config_path = PathBuf::from(&full_path);
-    subdir_config_path.push(".niobium.config");
-    if subdir_config_path.is_file() {
-        // Try to read it as a TOML value
-        match Config::read_path_as_table(&subdir_config_path) {
-            Ok(value) => {
-                // Update the current config with the content of this one
-                Config::update_with(into_value, &value);
-            }
-            Err(error) => {
-                // Log the error and continue
-                eprintln!("Warning: unable to read local config file \"{}\" : {}", subdir_config_path.display(), error);
-            },
-        };
-        true
-    } else {
-        false
-    }
-}
-
-
 /// Return the list of valid subdirectories in the given path in the photos folder
-async fn list_subdirs(path: &PathBuf, folder: &str, include_hidden: bool, error_if_missing: bool) -> Result<Vec<String>, Error> {
+pub async fn list_subdirs(path: &PathBuf, folder: &str, include_hidden: bool, error_if_missing: bool) -> Result<Vec<String>, Error> {
     let mut subdirs: Vec<String> = Vec::new();
     let mut full_path = PathBuf::from(folder);
     full_path.push(path);
@@ -710,14 +706,12 @@ async fn list_subdirs(path: &PathBuf, folder: &str, include_hidden: bool, error_
     // Try to open a Stream to the content of this path
     let dir = match fs::read_dir(&full_path).await {
         Ok(dir) => dir,
-        Err(error) => {
-            if error.kind() == io::ErrorKind::NotFound && !error_if_missing {
-                // This directory doesn't exist, but error_is_missing is set to false, just return as if the directory is empty
-                return Ok(Vec::new());
-            } else {
-                return Err(Error::FileError(error, full_path.clone()));
-            }
-        }
+
+        // This directory doesn't exist, but error_is_missing is set to false, just return as if the directory is empty
+        Err(error) if error.kind() == io::ErrorKind::NotFound && !error_if_missing => return Ok(Vec::new()),
+
+        // Return any other error directly
+        Err(error) => return Err(Error::FileError(error, full_path.clone())),
     };
     let mut dir_stream = ReadDirStream::new(dir);
 
@@ -731,7 +725,7 @@ async fn list_subdirs(path: &PathBuf, folder: &str, include_hidden: bool, error_
                     let mut subdir_path = full_path.clone();
                     subdir_path.push(&dir_name);
                     let mut subdir_config_table: Table = Table::new();
-                    merge_subdir_config(&subdir_path, &mut subdir_config_table);
+                    Config::update_with_subdir(&subdir_path, &mut subdir_config_table);
                     let subdir_config = Config::from_table(subdir_config_table).unwrap_or_default();
                     if subdir_config.INDEX && (include_hidden || !subdir_config.HIDDEN) {
                         subdirs.push(dir_name);
@@ -754,33 +748,12 @@ async fn calculate_file_md5(path: &PathBuf) -> Result<String, Error> {
 }
 
 
-// List of chars used when building an UID (biased)
-pub const UID_CHARS_BIASED: [(char, u32); 36] = [
-    ('0', 4), ('1', 4), ('2', 4), ('3', 4), ('4', 4), ('5', 4), ('6', 4), ('7', 4), ('8', 4), ('9', 4),
-    ('a', 1), ('b', 1), ('c', 1), ('d', 1), ('e', 1), ('f', 1), ('g', 1), ('h', 1), ('i', 1), ('j', 1), ('k', 1), ('l', 1), ('m', 1),
-    ('n', 1), ('o', 1), ('p', 1), ('q', 1), ('r', 1), ('s', 1), ('t', 1), ('u', 1), ('v', 1), ('w', 1), ('x', 1), ('y', 1), ('z', 1)
-];
-
-// List of chars used when building an UID (set)
-pub const UID_CHARS: &str = "0123456789abcdefghijklmnopqrstuvwxyz";
-
-/// Generate an UID of the given length that doesn't already exist in the given list
-fn generate_uid(existing_uids: &Vec<String>, length: usize) -> String {
-    let mut rng = thread_rng();
-    loop {
-        let uid = UID_CHARS_BIASED.choose_multiple_weighted(&mut rng, length as usize, |item| item.1).unwrap()
-            .map(|item| String::from(item.0))
-            .collect::<Vec<String>>()
-            .join("");
-        if !existing_uids.contains(&uid) {
-            break uid;
-        }
-    }
-}
-
-
+/// Kinds of resized versions of photos generated in the cache folder
 pub enum ResizedType {
+    /// Thumbnail-sized photos displayed in the grid
     THUMBNAIL,
+
+    /// Large-size photos displayed in loupe mode
     LARGE,
 }
 

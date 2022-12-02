@@ -1,12 +1,14 @@
 #[macro_use] extern crate rocket;
 
 mod config;
+mod db;
 mod nav_data;
 mod photos;
-mod db;
+mod uid;
 
 use config::Config;
 use nav_data::NavData;
+use uid::UID;
 use rocket::fs::NamedFile;
 use rocket::http::Header;
 use std::{io, fmt::Display};
@@ -53,40 +55,42 @@ async fn rocket() -> _ {
 
 
 /// Route handler called to render the main layout of the gallery
-#[get("/<path..>", rank=5)]
-fn get_gallery(path: PathBuf, config: &State<Config>) -> PageResult {
+#[get("/<path..>", rank=15)]
+async fn get_gallery(path: PathBuf, config: &State<Config>) -> PageResult {
     // Check the requested path
     match photos::check_path(&path, &config.inner()) {
-
         Ok(_full_path) => {
             // Path looks valid, render the template
-            let nav_data = NavData::from_path(&path);
-            PageResult::Page(Template::render("main", context! {
-                config: config.inner(),
-                nav: nav_data,
-                uid_chars: photos::UID_CHARS,
-                load_grid_url: load_grid_url(&path),
-                load_nav_url: uri!(get_nav(&path)).to_string(),
-            }))
+            match NavData::from_path(&path, &config).await {
+                Ok(nav_data) => PageResult::Page(Template::render("main", context! {
+                    config: config.inner(),
+                    nav: nav_data,
+                    uid_chars: UID::CHARS,
+                    load_grid_url: uri!(get_grid(&path, None as Option<usize>, None as Option<usize>, None as Option<UID>)).to_string(),
+                    load_nav_url: uri!(get_nav(&path)).to_string(),
+                })),
+                Err(error) => {
+                    eprintln!("Error : unable to generate nav data for \"{}\" : {}", path.display(), error);
+                    PageResult::Err(())
+                }
+            }
         }
 
-        Err(error) => match error {
-            Error::FileError(error, _) => match error.kind() {
-                // The path is either not found or invalid for the current config, return the 404 template
-                io::ErrorKind::NotFound => page_404(&config),
-                
-                // For any other error, forward the error to the 500 Internal Error catcher
-                _ => PageResult::Err(()),
-            },
-            _ => PageResult::Err(()),
+        // The path is either not found or invalid for the current config, return the 404 template
+        Err(Error::FileError(error, _)) if error.kind() == io::ErrorKind::NotFound => page_404(&config),
+
+        // For any other error, forward it to the 500 Internal Error catcher
+        Err(error) => {
+            eprintln!("Error : unable to load the gallery at \"{}\" : {}", path.display(), error);
+            PageResult::Err(())
         }
     }
 }
 
 
-/// Route handler called by AJAX to return the grid items for the given path and parameters
-#[get("/<path..>?grid&<start>&<count>&<uid>", rank=1)]
-async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid: Option<String>, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
+/// Route handler called by javascript to return the grid items for the given path and parameters
+#[get("/<path..>?grid&<start>&<count>&<uid>", rank=10)]
+async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid: Option<UID>, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
     // Try to load the photos in the given path
     match photos::load(&path, config, db_conn).await {
 
@@ -99,12 +103,14 @@ async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid
                 photo.get_grid_item_url = uri!(get_grid_item(&photo.uid)).to_string();
             }
 
+            // Filter the results
             let mut photos_filtered = photos.as_mut_slice();
             if let Some(uid) = uid {
                 // Only return a single UID if requested
                 if let Some(idx) = photos_filtered.iter().position(|p| p.uid == uid) {
                     photos_filtered = &mut photos[idx..=idx]
                 }
+
             } else {
                 // Only return a subset if requested
                 let mut start = start.unwrap_or(0);
@@ -120,8 +126,8 @@ async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid
 
             // If the requested set is small enough, calculate the image sizes to improve the first display
             if photos_filtered.len() <= 100 {
-                for mut photo in photos_filtered.iter_mut() {
-                    let result = photos::parse_metadata(&mut photo, &config, &db_conn).await;
+                for photo in photos_filtered.iter_mut() {
+                    let result = photo.parse_metadata(&config, &db_conn).await;
                     if let Err(error) = result {
                         eprintln!("Warning : unable to parse metadata of photo {} : {}", photo.full_path(&config).display(), error);
                     }
@@ -135,42 +141,37 @@ async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid
             }))
         }
 
-        Err(error) => {
-            let result = match &error {
-                Error::FileError(file_error, _) => match &file_error.kind() {
-                    // The path is either not found or invalid for the current config, return the 404 template
-                    io::ErrorKind::NotFound => Ok(page_404(&config)),
+        // The path is either not found or invalid for the current config, return the 404 template
+        Err(Error::FileError(file_error, _)) if file_error.kind() == io::ErrorKind::NotFound => page_404(&config),
 
-                    // For any other error, forward the error to the 500 Internal Error catcher
-                    _ => Err(&error)
-                }
-                error => Err(error)
-            };
-            match result {
-                Ok(page_result) => page_result,
-                Err(error) => {
-                    eprintln!("Error : unable to load the photos grid : {}", error);
-                    PageResult::Err(())
-                }
-            }
+        // For any other error, forward it to the 500 Internal Error catcher
+        Err(error) => {
+            eprintln!("Error : unable to load the photos grid at \"{}\" : {}", path.display(), error);
+            PageResult::Err(())
         }
     }
 }
 
 
-/// Route handler called by AJAX to return the nav menu for the given path
-#[get("/<path..>?nav", rank=2)]
-fn get_nav(path: PathBuf, _config: &State<Config>) -> () {
-    //let nav_data = NavData::from_path(&path);
-    //Template::render("nav", context! {
-    //    config: config.inner(),
-    //})
+/// Route handler called by javascript to return the nav menu for the given path
+#[get("/<path..>?nav", rank=11)]
+async fn get_nav(path: PathBuf, config: &State<Config>) -> PageResult {
+    match NavData::from_path(&path, &config).await {
+        Ok(nav_data) => PageResult::Page(Template::render("nav", context! {
+            config: &config.inner(),
+            nav: nav_data,
+        })),
+        Err(error) => {
+            eprintln!("Error : unable to generate nav data for \"{}\" : {}", path.display(), error);
+            PageResult::Err(())
+        }
+    }
 }
 
 
 /// Route handler called asynchronously to render a single photo inside the grid
-#[get("/<uid>/grid-item")]
-async fn get_grid_item(uid: String, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
+#[get("/<uid>/grid-item", rank=1)]
+async fn get_grid_item(uid: UID, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
     match photos::get_from_uid(&uid, config, db_conn).await {
         Ok(Some(photo)) => PageResult::Page(Template::render("grid-item", context! {
             config: &config.inner(),
@@ -182,7 +183,7 @@ async fn get_grid_item(uid: String, config: &State<Config>, db_conn: &State<Mute
         })),
         Ok(None) => page_404(&config),
         Err(error) => {
-            eprintln!("Error : unable to render a grid item : {}", error);
+            eprintln!("Error : unable to render a grid item for UID #{} : {}", uid, error);
             PageResult::Err(())
         }
     }
@@ -190,23 +191,24 @@ async fn get_grid_item(uid: String, config: &State<Config>, db_conn: &State<Mute
 
 
 /// Route handler that returns the thumbnail version of the requested UID
-#[get("/<uid>/thumbnail")]
-async fn get_thumbnail(uid: String, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
+#[get("/<uid>/thumbnail", rank=2)]
+async fn get_thumbnail(uid: UID, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
     get_resized(&uid, photos::ResizedType::THUMBNAIL, &config, &db_conn).await
 }
 
 
 /// Route handler that returns the large resized version of the requested UID
-#[get("/<uid>/large")]
-async fn get_large(uid: String, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
+#[get("/<uid>/large", rank=3)]
+async fn get_large(uid: UID, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
     get_resized(&uid, photos::ResizedType::LARGE, &config, &db_conn).await
 }
 
 
 /// Returns the resized version of the requested UID for the given prefix
-async fn get_resized(uid: &String, resized_type: photos::ResizedType, config: &Config, db_conn: &Mutex<Connection>) -> PageResult {
+async fn get_resized(uid: &UID, resized_type: photos::ResizedType, config: &Config, db_conn: &Mutex<Connection>) -> PageResult {
     match photos::get_resized_from_uid(uid, resized_type, config, db_conn).await {
         Ok(Some((photo, resized_file_path))) => {
+            // Try to open the file
             match NamedFile::open(&resized_file_path).await {
                 Ok(file) => PageResult::Photo(file),
                 Err(error) => {
@@ -217,7 +219,7 @@ async fn get_resized(uid: &String, resized_type: photos::ResizedType, config: &C
         }
         Ok(None) => page_404(&config),
         Err(error) => {
-            eprintln!("Error : unable to return a resized photo : {}", error);
+            eprintln!("Error : unable to return a resized photo for UID #{} : {}", uid, error);
             PageResult::Err(())
         }
     }
@@ -225,10 +227,11 @@ async fn get_resized(uid: &String, resized_type: photos::ResizedType, config: &C
 
 
 /// Route handler that returns the photo file for the requested UID
-#[get("/<uid>")]
-async fn get_photo(uid: String, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
+#[get("/<uid>", rank=5)]
+async fn get_photo(uid: UID, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
     match photos::get_from_uid(&uid, config, db_conn).await {
         Ok(Some(photo)) => {
+            // Try to open the file
             let full_path = photo.full_path(config);
             match NamedFile::open(&full_path).await {
                 Ok(file) => PageResult::Photo(file),
@@ -240,7 +243,7 @@ async fn get_photo(uid: String, config: &State<Config>, db_conn: &State<Mutex<Co
         }
         Ok(None) => page_404(&config),
         Err(error) => {
-            eprintln!("Error : unable to return a photo : {}", error);
+            eprintln!("Error : unable to return a photo for UID #{} : {}", uid, error);
             PageResult::Err(())
         }
     }
@@ -248,12 +251,13 @@ async fn get_photo(uid: String, config: &State<Config>, db_conn: &State<Mutex<Co
 
 
 /// Route handler that returns the photo file for the requested UID as a download
-#[get("/<uid>/download")]
-async fn download_photo(uid: String, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
+#[get("/<uid>/download", rank=4)]
+async fn download_photo(uid: UID, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
     match photos::get_from_uid(&uid, config, db_conn).await {
         Ok(Some(photo)) => {
+            // Try to open the file
             let full_path = photo.full_path(config);
-            match DownloadedNamedFile::open(&full_path, &photo.uid).await {
+            match DownloadedNamedFile::open(&full_path, &photo.uid, &config).await {
                 Ok(file) => PageResult::PhotoDownload(file),
                 Err(error) => {
                     eprintln!("Error : unable to read file \"{}\" : {}", full_path.display(), error);
@@ -263,7 +267,7 @@ async fn download_photo(uid: String, config: &State<Config>, db_conn: &State<Mut
         }
         Ok(None) => page_404(&config),
         Err(error) => {
-            eprintln!("Error : unable to return a photo as a download : {}", error);
+            eprintln!("Error : unable to return a photo as a download for UID #{} : {}", uid, error);
             PageResult::Err(())
         }
     }
@@ -274,14 +278,10 @@ async fn download_photo(uid: String, config: &State<Config>, db_conn: &State<Mut
 fn page_404(config: &Config) -> PageResult {
     PageResult::NotFound(Template::render("404", context! {
         config: config,
-        url_gallery_root: uri!(get_gallery(""))
+        url_gallery_root: uri!(get_gallery(PathBuf::from("/")))
     }))
 }
 
-
-fn load_grid_url(path: &PathBuf) -> String {
-    uri!(get_grid(path, None as Option<usize>, None as Option<usize>, None as Option<String>)).to_string()
-}
 
 
 /// Responder used by most routes
@@ -305,7 +305,7 @@ pub struct DownloadedNamedFile {
 }
 
 impl DownloadedNamedFile {
-    pub async fn open<P>(path: P, uid: &String) -> io::Result<Self>
+    pub async fn open<P>(path: P, uid: &UID, config: &Config) -> io::Result<Self>
     where
         P: AsRef<Path>
     {
@@ -314,7 +314,7 @@ impl DownloadedNamedFile {
                 inner: file,
                 content_disposition: Header::new(
                     rocket::http::hyper::header::CONTENT_DISPOSITION.as_str(),
-                    format!("attachment; filename=\"niobium_{}.jpg\"", uid)
+                    format!("attachment; filename=\"{}{}.jpg\"", &config.DOWNLOAD_PREFIX, uid.to_string())
                 ),
             }
         )
@@ -322,7 +322,7 @@ impl DownloadedNamedFile {
 }
 
 
-/// Generic error type used to uniformize errors across the crate
+/// General type used to standardize errors across the crate
 #[derive(Debug)]
 pub enum Error {
     FileError(io::Error, PathBuf),

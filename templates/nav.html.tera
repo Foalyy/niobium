@@ -1,0 +1,32 @@
+<div class="navigation-panel-content">
+    {% if config.TITLE %}<div class="navigation-panel-title">{{ config.TITLE }}</div>{% endif %}
+    <div class="navigation-panel-current-path">
+        {% if nav.path_split_open %}
+            {% for dir in nav.path_split_open_with_urls %}
+                {% if loop.first %}
+                    <div class="navigation-panel-current-path-separator navigation-panel-current-path-separator-first"><a class="nav-link" href="{{ nav.url_path_root | safe }}" data-load-url="{{ nav.url_path_root | safe }}?grid" data-nav-url="{{ nav.url_path_root | safe }}?nav">/</a></div>
+                {% else %}
+                    <div class="navigation-panel-current-path-separator">/</div>
+                {% endif %}
+                <div class="navigation-panel-current-path-element"><a class="nav-link" href="{{ dir.1 | safe }}" data-load-url="{{ dir.1 | safe }}?grid" data-nav-url="{{ dir.1 | safe }}?nav">{{ dir.0 }}</a></div>
+            {% endfor %}
+        {% else %}
+            <div class="navigation-panel-current-path-separator navigation-panel-current-path-separator-first"><a class="nav-link" href="{{ nav.url_path_root | safe }}" data-load-url="{{ nav.url_path_root | safe }}?grid" data-nav-url="{{ nav.url_path_root | safe }}?nav">/</a></div>
+        {% endif %}
+    </div>
+    <div class="navigation-panel-n-photos invisible"><i class="fa-solid fa-images"></i> <span class="navigation-panel-n-photos-value"></span> photos</div>
+    {% if nav.url_navigate_up %}
+        <div class="link-navigate-up" data-href="{{ nav.url_navigate_up }}" data-load-url="{{ nav.url_navigate_up | safe }}?grid" data-nav-url="{{ nav.url_navigate_up | safe }}?nav"></div>
+    {% endif %}
+    <ul class="navigation-panel-subdirs">
+        {% if not nav.is_root %}
+            <li class="navigation-panel-subdir-parent"><a class="nav-link" href="{{ nav.url_path_parent | safe }}" data-load-url="{{ nav.url_path_parent | safe }}?grid" data-nav-url="{{ nav.url_path_parent | safe }}?nav"><i class="fa-solid fa-circle-chevron-left fa-fw"></i> {{ nav.parent }}</a></li>
+        {% endif %}
+        <li class="navigation-panel-subdir-current"><a class="nav-link" href="{{ nav.url_path_current | safe }}" data-load-url="{{ nav.url_path_current | safe }}?grid" data-nav-url="{{ nav.url_path_current | safe }}?nav"><i class="fa-solid fa-folder-open fa-fw"></i> {{ nav.current }}</a></li>
+        {% for subdir in nav.subdirs_with_urls %}
+            <li class="navigation-panel-subdir{% if subdir.0 == nav.open_subdir %} navigation-panel-subdir-open selected{% endif %}"><a class="nav-link" href="{{ subdir.1 | safe }}" data-load-url="{{ subdir.1 | safe }}?grid" data-nav-url="{{ subdir.1 | safe }}?nav"><i class="fa-solid fa-folder fa-fw"></i><i class="fa-solid fa-folder-open fa-fw"></i> {% if subdir.0 in nav.locked_subdirs %}<i class="fa-solid fa-lock fa-fw"></i> {% endif %}{{ subdir.0 }}</a></li>
+        {% else %}
+            <li class="navigation-panel-no-subdirs">No subdirectories</li>
+        {% endfor %}
+    </ul>
+</div>
