@@ -8,13 +8,16 @@ use std::pin::Pin;
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use md5::{Md5, Digest};
+use rocket::{Rocket, fairing};
 use rocket::serde::Serialize;
 use rocket::tokio::fs::create_dir_all;
 use rocket::tokio::time::Instant;
-use rocket::tokio::{fs, sync::Mutex};
+use rocket::tokio::fs;
 use rocket::futures::StreamExt;
+use rocket_db_pools::Database;
+use rocket_db_pools::sqlx::Sqlite;
+use rocket_db_pools::sqlx::pool::PoolConnection;
 use tokio_stream::wrappers::ReadDirStream;
-use rusqlite::Connection;
 use toml::value::Table;
 
 
@@ -56,7 +59,7 @@ impl Photo {
 
     /// Try to open the photo file to extract its metadata and store them in the database.
     /// If this has already been done according to the `metadata_parsed` field, this is a no-op.
-    pub async fn parse_metadata(&mut self, config: &Config, db_conn: &Mutex<Connection>) -> Result<(), Error> {
+    pub async fn parse_metadata(&mut self, config: &Config, db_conn: &mut PoolConnection<Sqlite>) -> Result<(), Error> {
         if self.metadata_parsed {
             // Metadata already parsed, nothing to do
             return Ok(());
@@ -219,10 +222,10 @@ impl Photo {
 
 
 /// Load all available photos in the photos folder and sync them with the database
-pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) -> Result<Vec<Photo>, Error> {
+pub async fn load(path: &PathBuf, config: &Config, db_conn: &mut PoolConnection<Sqlite>) -> Result<Vec<Photo>, Error> {
 
     // Inner function used to load photos recursively
-    fn _load<'a>(full_path: &'a PathBuf, rel_path: &'a PathBuf, db_conn: &'a Mutex<Connection>, main_config: &'a Config, subdir_config: &'a toml::value::Table, default_config: &'a Config, displayed_photos: &'a mut Vec<Photo>, photos_to_insert: &'a mut Option<&mut Vec<Photo>>,
+    fn _load<'a>(full_path: &'a PathBuf, rel_path: &'a PathBuf, db_conn: &'a mut PoolConnection<Sqlite>, main_config: &'a Config, subdir_config: &'a toml::value::Table, default_config: &'a Config, displayed_photos: &'a mut Vec<Photo>, photos_to_insert: &'a mut Option<&mut Vec<Photo>>,
             photos_to_remove: &'a mut Option<&mut Vec<Photo>>, paths_found: &'a mut Option<&mut Vec<PathBuf>>, is_subdir: bool) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>> {
         Box::pin(async move {
             // True if this is the path actually requested by the user, not one of its subdirs opened recursively
@@ -421,7 +424,6 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
 
                 // Load subdirs recursively
                 if !subdirs.is_empty() {
-                    //println!("    subdirs({}):{:?}", subdirs.len(), subdirs);
                     for subdir in subdirs {
                         let mut subdir_rel_path = rel_path.clone();
                         subdir_rel_path.push(&subdir);
@@ -485,7 +487,7 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
     let mut photos_to_remove: Vec<Photo> = Vec::new();
     let mut paths_found: Vec<PathBuf> = Vec::new();
     _load(&full_path, &path, db_conn, &config, &subdir_config, &default_config, &mut displayed_photos, &mut Some(&mut photos_to_insert), 
-    &mut Some(&mut photos_to_remove), &mut Some(&mut paths_found), false).await?;
+        &mut Some(&mut photos_to_remove), &mut Some(&mut paths_found), false).await?;
 
     // Get the list of all known subdirs of the current path in the database, check if some have been removed,
     // and if so add their photos to the 'to_remove' list
@@ -598,8 +600,41 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &Mutex<Connection>) 
 }
 
 
+/// Fairing callback used to load/sync the photos with the database at startup
+pub async fn init_load(rocket: Rocket<rocket::Build>) -> fairing::Result {
+    // Make sure the database has been initialized (fairings have been attached in the correct order)
+    match db::DB::fetch(&rocket) {
+        Some(db) => match db.0.acquire().await {
+            Ok(mut db_conn) => {
+                println!("Loading photos...");
+                let now = Instant::now();
+                let config = rocket.state::<Config>()
+                    .expect("Error : unable to obtain the config");
+                match load(&PathBuf::from(""), &config, &mut db_conn).await {
+                    Ok(photos) => {
+                        println!("Loaded {} photos successfully in {}ms", photos.len(), now.elapsed().as_millis());
+                        Ok(rocket)
+                    }
+                    Err(error) => {
+                        eprintln!("Error : unable to load photos : {}", error);
+                        Err(rocket)
+                    }
+                }}
+            Err(error) => {
+                eprintln!("Error : unable to acquire a connection to the database : {}", error);
+                Err(rocket)
+            }
+        }
+        None => {
+            eprintln!("Error : unable to obtain a handle to the database");
+            Err(rocket)
+        }
+    }
+}
+
+
 /// Load a single photo from the database
-pub async fn get_from_uid(uid: &UID, config: &Config, db_conn: &Mutex<Connection>) -> Result<Option<Photo>, Error> {
+pub async fn get_from_uid(uid: &UID, config: &Config, db_conn: &mut PoolConnection<Sqlite>) -> Result<Option<Photo>, Error> {
     // Get the photo associated to this uid
     let photo = db::get_photo(db_conn, uid).await;
 
@@ -625,7 +660,7 @@ pub async fn get_from_uid(uid: &UID, config: &Config, db_conn: &Mutex<Connection
 
 /// Load a single photo from the database and return the path to its resized version,
 /// after generating it if necessary
-pub async fn get_resized_from_uid(uid: &UID, resized_type: ResizedType, config: &Config, db_conn: &Mutex<Connection>) -> Result<Option<(Photo, PathBuf)>, Error> {
+pub async fn get_resized_from_uid(uid: &UID, resized_type: ResizedType, config: &Config, db_conn: &mut PoolConnection<Sqlite>) -> Result<Option<(Photo, PathBuf)>, Error> {
     match get_from_uid(uid, config, db_conn).await? {
         Some(photo) => {
             // Path of the resized version of this photo in the cache folder

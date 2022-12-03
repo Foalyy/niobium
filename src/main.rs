@@ -7,16 +7,18 @@ mod photos;
 mod uid;
 
 use config::Config;
+use db::DB;
 use nav_data::NavData;
+use rocket::fairing::AdHoc;
 use uid::UID;
 use rocket::fs::NamedFile;
 use rocket::http::Header;
+use rocket::{fs::FileServer, State};
+use rocket_dyn_templates::{Template, context};
+use rocket_db_pools::{Connection, sqlx, Database};
 use std::net::IpAddr;
 use std::{io, fmt::Display};
 use std::path::{PathBuf, Path};
-use rocket::{fs::FileServer, State, tokio::sync::Mutex};
-use rocket_dyn_templates::{Template, context};
-use rusqlite::Connection;
 
 
 
@@ -31,19 +33,10 @@ async fn rocket() -> _ {
             eprintln!("Error : invalid value for ADDRESS in {} : {}", config::FILENAME, e);
             std::process::exit(-1);
         }).unwrap()))
-        .merge(("port", config.PORT));
+        .merge(("port", config.PORT))
+        .merge(("databases.niobium.url", &config.DATABASE_PATH));
 
-    // Try to open a connection to the SQLite database
-    let db_conn = Mutex::new(db::open_or_exit(&config));
-
-    // Load the photos, or exit immediately in case of an error
-    // Note : photos::load() will print the error message on stderr
-    photos::load(&PathBuf::from(""), &config, &db_conn).await
-        .unwrap_or_else(|error| {
-            eprintln!("Error : unable to load photos : {}", error);
-            std::process::exit(-1)
-        });
-
+        
     // Let's go to spaaace !
     rocket::custom(figment)
         .mount("/", routes![
@@ -58,8 +51,10 @@ async fn rocket() -> _ {
         ])
         .mount("/static", FileServer::from("static/").rank(0))
         .attach(Template::fairing())
+        .attach(DB::init())
+        .attach(AdHoc::try_on_ignite("Database schema init", db::init_schema))
         .manage(config)
-        .manage(db_conn)
+        .attach(AdHoc::try_on_ignite("Photos init", photos::init_load))
 }
 
 
@@ -100,9 +95,9 @@ async fn get_gallery(path: PathBuf, config: &State<Config>) -> PageResult {
 
 /// Route handler called by javascript to return the grid items for the given path and parameters
 #[get("/<path..>?grid&<start>&<count>&<uid>", rank=10)]
-async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid: Option<UID>, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
+async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid: Option<UID>, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
     // Try to load the photos in the given path
-    match photos::load(&path, config, db_conn).await {
+    match photos::load(&path, config, &mut db_conn).await {
 
         // We have a valid (possibly empty) list of photos, render it as a template
         Ok(mut photos) => {
@@ -137,7 +132,7 @@ async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid
             // If the requested set is small enough, calculate the image sizes to improve the first display
             if photos_filtered.len() <= 100 {
                 for photo in photos_filtered.iter_mut() {
-                    let result = photo.parse_metadata(&config, &db_conn).await;
+                    let result = photo.parse_metadata(&config, &mut db_conn).await;
                     if let Err(error) = result {
                         eprintln!("Warning : unable to parse metadata of photo {} : {}", photo.full_path(&config).display(), error);
                     }
@@ -181,8 +176,8 @@ async fn get_nav(path: PathBuf, config: &State<Config>) -> PageResult {
 
 /// Route handler called asynchronously to render a single photo inside the grid
 #[get("/<uid>/grid-item", rank=1)]
-async fn get_grid_item(uid: UID, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
-    match photos::get_from_uid(&uid, config, db_conn).await {
+async fn get_grid_item(uid: UID, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
+    match photos::get_from_uid(&uid, config, &mut db_conn).await {
         Ok(Some(photo)) => PageResult::Page(Template::render("grid-item", context! {
             config: &config.inner(),
             photo: &photo,
@@ -202,20 +197,20 @@ async fn get_grid_item(uid: UID, config: &State<Config>, db_conn: &State<Mutex<C
 
 /// Route handler that returns the thumbnail version of the requested UID
 #[get("/<uid>/thumbnail", rank=2)]
-async fn get_thumbnail(uid: UID, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
-    get_resized(&uid, photos::ResizedType::THUMBNAIL, &config, &db_conn).await
+async fn get_thumbnail(uid: UID, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
+    get_resized(&uid, photos::ResizedType::THUMBNAIL, &config, &mut db_conn).await
 }
 
 
 /// Route handler that returns the large resized version of the requested UID
 #[get("/<uid>/large", rank=3)]
-async fn get_large(uid: UID, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
-    get_resized(&uid, photos::ResizedType::LARGE, &config, &db_conn).await
+async fn get_large(uid: UID, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
+    get_resized(&uid, photos::ResizedType::LARGE, &config, &mut db_conn).await
 }
 
 
 /// Returns the resized version of the requested UID for the given prefix
-async fn get_resized(uid: &UID, resized_type: photos::ResizedType, config: &Config, db_conn: &Mutex<Connection>) -> PageResult {
+async fn get_resized(uid: &UID, resized_type: photos::ResizedType, config: &Config, db_conn: &mut Connection<DB>) -> PageResult {
     match photos::get_resized_from_uid(uid, resized_type, config, db_conn).await {
         Ok(Some((photo, resized_file_path))) => {
             // Try to open the file
@@ -238,8 +233,8 @@ async fn get_resized(uid: &UID, resized_type: photos::ResizedType, config: &Conf
 
 /// Route handler that returns the photo file for the requested UID
 #[get("/<uid>", rank=5)]
-async fn get_photo(uid: UID, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
-    match photos::get_from_uid(&uid, config, db_conn).await {
+async fn get_photo(uid: UID, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
+    match photos::get_from_uid(&uid, config, &mut db_conn).await {
         Ok(Some(photo)) => {
             // Try to open the file
             let full_path = photo.full_path(config);
@@ -262,8 +257,8 @@ async fn get_photo(uid: UID, config: &State<Config>, db_conn: &State<Mutex<Conne
 
 /// Route handler that returns the photo file for the requested UID as a download
 #[get("/<uid>/download", rank=4)]
-async fn download_photo(uid: UID, config: &State<Config>, db_conn: &State<Mutex<Connection>>) -> PageResult {
-    match photos::get_from_uid(&uid, config, db_conn).await {
+async fn download_photo(uid: UID, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
+    match photos::get_from_uid(&uid, config, &mut db_conn).await {
         Ok(Some(photo)) => {
             // Try to open the file
             let full_path = photo.full_path(config);
@@ -335,16 +330,20 @@ impl DownloadedNamedFile {
 /// General type used to standardize errors across the crate
 #[derive(Debug)]
 pub enum Error {
+    InvalidRequestError(PathBuf),
+    InvalidUIDError(UID),
     FileError(io::Error, PathBuf),
     TomlParserError(toml::de::Error),
-    DatabaseError(rusqlite::Error),
-    ImageError(image::error::ImageError, PathBuf),
+    DatabaseError(sqlx::Error),
+    ImageError(image::ImageError, PathBuf),
     EXIFParserError(exif::Error, PathBuf),
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Error::InvalidRequestError(path) => write!(f, "invalid request : \"{}\"", path.display()),
+            Error::InvalidUIDError(uid) => write!(f, "invalid UID : \"{}\"", uid),
             Error::FileError(error, path) => write!(f, "file error for \"{}\" : {}", path.display(), error),
             Error::TomlParserError(error) => write!(f, "TOML parser error : {}", error),
             Error::DatabaseError(error) => write!(f, "database error : {}", error),

@@ -125,19 +125,3 @@ impl UriDisplay<rocket::http::uri::fmt::Query> for UID {
 // Macros used to automatically implement the FromUriParam trait based on the UriDisplay impls above
 impl_from_uri_param_identity!([rocket::http::uri::fmt::Path] UID);
 impl_from_uri_param_identity!([rocket::http::uri::fmt::Query] UID);
-
-/// Convert a UID to an SQL-compatible representation
-impl rusqlite::ToSql for UID {
-    #[inline]
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        Ok(rusqlite::types::ToSqlOutput::from(self.to_string()))
-    }
-}
-
-/// Parse an SQL string into an UID
-impl rusqlite::types::FromSql for UID {
-    #[inline]
-    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
-        value.as_str().and_then(|s| UID::try_from(s).map_err(|_| rusqlite::types::FromSqlError::InvalidType))
-    }
-}
