@@ -17,6 +17,7 @@ use rocket::{fs::FileServer, State};
 use rocket_dyn_templates::{Template, context};
 use rocket_db_pools::{Connection, sqlx, Database};
 use std::net::IpAddr;
+use std::time::Instant;
 use std::{io, fmt::Display};
 use std::path::{PathBuf, Path};
 
@@ -26,6 +27,8 @@ use std::path::{PathBuf, Path};
 async fn rocket() -> _ {
     // Try to read the config file
     let config = Config::read_or_exit();
+    let address = config.ADDRESS.clone();
+    let port = config.PORT;
 
     // Send some of the settings to Rocket
     let figment = rocket::Config::figment()
@@ -36,7 +39,7 @@ async fn rocket() -> _ {
         .merge(("port", config.PORT))
         .merge(("databases.niobium.url", &config.DATABASE_PATH));
 
-        
+
     // Let's go to spaaace !
     rocket::custom(figment)
         .mount("/", routes![
@@ -55,6 +58,9 @@ async fn rocket() -> _ {
         .attach(AdHoc::try_on_ignite("Database schema init", db::init_schema))
         .manage(config)
         .attach(AdHoc::try_on_ignite("Photos init", photos::init_load))
+        .attach(AdHoc::on_liftoff("Startup message", move |_| Box::pin(async move {
+            println!("## Niobium started on {}:{}", address, port);
+        })))
 }
 
 
@@ -96,11 +102,14 @@ async fn get_gallery(path: PathBuf, config: &State<Config>) -> PageResult {
 /// Route handler called by javascript to return the grid items for the given path and parameters
 #[get("/<path..>?grid&<start>&<count>&<uid>", rank=10)]
 async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid: Option<UID>, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
+    let now = Instant::now();
+    
     // Try to load the photos in the given path
     match photos::load(&path, config, &mut db_conn).await {
 
         // We have a valid (possibly empty) list of photos, render it as a template
         Ok(mut photos) => {
+            println!("Finished loading in {}ms", now.elapsed().as_millis());
             let n_photos = photos.len();
 
             // Add the load url to each photo
@@ -332,6 +341,7 @@ impl DownloadedNamedFile {
 pub enum Error {
     InvalidRequestError(PathBuf),
     InvalidUIDError(UID),
+    UIDParserError(String),
     FileError(io::Error, PathBuf),
     TomlParserError(toml::de::Error),
     DatabaseError(sqlx::Error),
@@ -344,11 +354,24 @@ impl Display for Error {
         match self {
             Error::InvalidRequestError(path) => write!(f, "invalid request : \"{}\"", path.display()),
             Error::InvalidUIDError(uid) => write!(f, "invalid UID : \"{}\"", uid),
+            Error::UIDParserError(uid) => write!(f, "invalid UID format : \"{}\"", uid),
             Error::FileError(error, path) => write!(f, "file error for \"{}\" : {}", path.display(), error),
             Error::TomlParserError(error) => write!(f, "TOML parser error : {}", error),
             Error::DatabaseError(error) => write!(f, "database error : {}", error),
             Error::ImageError(error, path) => write!(f, "image error for \"{}\" : {}", path.display(), error),
             Error::EXIFParserError(error, path) => write!(f, "EXIF parser error for \"{}\" : {}", path.display(), error),
         }
+    }
+}
+
+impl From<sqlx::Error> for Error {
+    fn from(error: sqlx::Error) -> Self {
+        Error::DatabaseError(error)
+    }
+}
+
+impl From<toml::de::Error> for Error {
+    fn from(error: toml::de::Error) -> Self {
+        Error::TomlParserError(error)
     }
 }

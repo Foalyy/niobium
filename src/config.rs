@@ -210,8 +210,7 @@ impl Config {
 
     /// Read the main config file and deserialize it into a Config struct
     pub fn read() -> Result<Self, Error> {
-        Ok(toml::from_str(Self::read_path_as_string(FILENAME)?.as_str())
-            .map_err(|e| Error::TomlParserError(e))?)
+        Ok(toml::from_str(Self::read_path_as_string(FILENAME)?.as_str())?)
     }
 
     /// Try to read and parse the config file
@@ -246,8 +245,7 @@ impl Config {
     // pub fn read_path<P>(path: P) -> Result<Self, Error>
     //     where P: AsRef<Path>
     // {
-    //     Ok(toml::from_str(Self::read_path_as_string(path)?.as_str())
-    //         .map_err(|e| Error::ParseError(e))?)
+    //     Ok(toml::from_str(Self::read_path_as_string(path)?.as_str())?)
     // }
 
     /// Read the config file at the given location and return it as a simple String
@@ -262,16 +260,14 @@ impl Config {
     pub fn read_path_as_value<P>(path: P) -> Result<toml::Value, Error>
         where P: AsRef<Path>
     {
-        Ok(Self::read_path_as_string(path)?.parse::<toml::Value>()
-            .map_err(|e| Error::TomlParserError(e))?)
+        Ok(Self::read_path_as_string(path)?.parse::<toml::Value>()?)
     }
 
     /// Read the config file at the given location and return it as a TOML Table
     pub fn read_path_as_table<P>(path: P) -> Result<Table, Error>
         where P: AsRef<Path>
     {
-        Ok(Self::read_path_as_value(path)?.try_into::<Table>()
-            .map_err(|e| Error::TomlParserError(e))?)
+        Ok(Self::read_path_as_value(path)?.try_into::<Table>()?)
     }
 
     // /// Update in place the given config (as a TOML Value) with the `other` config and return it

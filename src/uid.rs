@@ -5,6 +5,7 @@ use rocket::http::uri::fmt::UriDisplay;
 use rocket::form::{self, FromFormField, DataField, ValueField};
 use rocket::request::FromParam;
 use rocket::serde::Serialize;
+use crate::Error;
 
 
 #[derive(Default, Serialize, Clone, Debug, PartialEq, Eq)]
@@ -39,6 +40,12 @@ impl UID {
             }
         }
     }
+
+    pub fn empty() -> Self {
+        UID {
+            uid: "".to_string(),
+        }
+    }
 }
 
 /// Display this UID as a String
@@ -51,7 +58,7 @@ impl std::fmt::Display for UID {
 
 /// Try to parse a valid UID from the given string slice
 impl TryFrom<&str> for UID {
-    type Error = &'static str;
+    type Error = Error;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         if value.len() == Self::LENGTH {
@@ -59,19 +66,19 @@ impl TryFrom<&str> for UID {
             let chars = Self::CHARS_BIASED.map(|t| t.0);
             for c in value_string.chars() {
                 if !chars.contains(&c) {
-                    return Err("Invalid char");
+                    return Err(Error::UIDParserError(value.to_string()));
                 }
             }
             Ok(Self { uid: value_string })
         } else {
-            Err("Invalid UID length")
+            Err(Error::UIDParserError(value.to_string()))
         }
     }
 }
 
 /// Try to parse a valid UID from the given String
 impl TryFrom<&String> for UID {
-    type Error = &'static str;
+    type Error = Error;
 
     #[inline]
     fn try_from(value: &String) -> Result<Self, Self::Error> {
