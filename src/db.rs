@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::{Error, photos::Photo, uid::UID};
+use crate::{Error, photos::Photo, uid::UID, config::Config};
 use rocket::{fairing, Rocket, Build, tokio::fs};
 use rocket_db_pools::{sqlx::{self, query::Query, Sqlite, sqlite::{SqliteArguments, SqliteRow}, QueryBuilder, pool::PoolConnection}, sqlx::Row, Database};
 
@@ -103,7 +103,7 @@ pub async fn get_all_paths(db_conn: &mut PoolConnection<Sqlite>) -> Result<Vec<P
 
 
 /// Get the list of photos known in the database that are registered in one of the given paths
-pub async fn get_photos_in_paths(db_conn: &mut PoolConnection<Sqlite>, paths: &Vec<PathBuf>) -> Result<Vec<Photo>, Error> {
+pub async fn get_photos_in_paths(db_conn: &mut PoolConnection<Sqlite>, paths: &Vec<PathBuf>, config: &Config) -> Result<Vec<Photo>, Error> {
     let mut photos: Vec<Photo> = Vec::new();
     for batch in paths.chunks(100) {
         let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT * FROM photo WHERE path IN (");
@@ -113,14 +113,14 @@ pub async fn get_photos_in_paths(db_conn: &mut PoolConnection<Sqlite>, paths: &V
         }
         separated.push_unseparated(");");
         let query = query_builder.build();
-        photos.append(&mut get_photos_from_query(db_conn, query).await?);
+        photos.append(&mut get_photos_from_query(db_conn, query, config).await?);
     }
     Ok(photos)
 }
 
 
 /// Get the list of photos known in the database that are registered in the given path, ordered
-pub async fn get_photos_in_path(db_conn: &mut PoolConnection<Sqlite>, path: &PathBuf, sort_columns: &Vec<String>) -> Result<Vec<Photo>, Error> {
+pub async fn get_photos_in_path(db_conn: &mut PoolConnection<Sqlite>, path: &PathBuf, sort_columns: &Vec<String>, config: &Config) -> Result<Vec<Photo>, Error> {
     let mut query_builder = QueryBuilder::new("SELECT * FROM photo WHERE path=");
     query_builder.push_bind(path.to_string_lossy());
     query_builder.push(" ORDER BY ");
@@ -131,13 +131,13 @@ pub async fn get_photos_in_path(db_conn: &mut PoolConnection<Sqlite>, path: &Pat
     separated.push_unseparated(";");
 
     let query = query_builder.build();
-    get_photos_from_query(db_conn, query).await
+    get_photos_from_query(db_conn, query, config).await
 }
 
 
 /// Execute the given query (which must be a "SELECT * FROM photo", and parameters must already have been bound)
 /// and map the resulting rows to a list of Photo's
-async fn get_photos_from_query<'q>(db_conn: &mut PoolConnection<Sqlite>, query: Query<'q, Sqlite, SqliteArguments<'q>>) -> Result<Vec<Photo>, Error> {
+async fn get_photos_from_query<'q>(db_conn: &mut PoolConnection<Sqlite>, query: Query<'q, Sqlite, SqliteArguments<'q>>, config: &Config) -> Result<Vec<Photo>, Error> {
     Ok(
         query.fetch_all(db_conn).await
             .and_then(|rows| Ok(
@@ -147,7 +147,15 @@ async fn get_photos_from_query<'q>(db_conn: &mut PoolConnection<Sqlite>, query: 
                         row_to_photo(row).or_else(|e| {
                             eprintln!("Warning : database error : unable to decode a photo : {}", e);
                             Err(e)
-                        }).ok()
+                        })
+                        .and_then(|mut photo| {
+                            let mut full_path = PathBuf::from(&config.PHOTOS_DIR);
+                            full_path.push(&photo.path);
+                            full_path.push(&photo.filename);
+                            photo.full_path = full_path;
+                            Ok(photo)
+                        })
+                        .ok()
                     })
                     .collect::<Vec<Photo>>()
             ))?

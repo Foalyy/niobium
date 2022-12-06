@@ -11,7 +11,7 @@ use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use md5::{Md5, Digest};
 use rocket::tokio::sync::{RwLock, RwLockReadGuard};
-use rocket::{Rocket, fairing};
+use rocket::{Rocket, fairing, tokio};
 use rocket::serde::Serialize;
 use rocket::tokio::fs::create_dir_all;
 use rocket::tokio::time::Instant;
@@ -30,6 +30,7 @@ pub struct Photo {
     pub id: u32,
     pub filename: String,
     pub path: PathBuf,
+    pub full_path: PathBuf,
     pub uid: UID,
     pub md5: String,
     pub sort_order: u32,
@@ -50,29 +51,20 @@ pub struct Photo {
 }
 
 impl Photo {
-    /// Return the full path to this photo file
-    pub fn full_path(&self, config: &Config) -> PathBuf {
-        let mut full_path = PathBuf::from(&config.PHOTOS_DIR);
-        full_path.push(&self.path);
-        full_path.push(&self.filename);
-        full_path
-    }
-
     /// Try to open the photo file to extract its metadata and store them in the database.
     /// If this has already been done according to the `metadata_parsed` field, this is a no-op.
-    pub async fn parse_metadata(&mut self, config: &Config) -> Result<(), Error> {
+    pub async fn parse_metadata(&mut self, read_exif: bool) -> Result<(), Error> {
         if self.metadata_parsed {
             // Metadata already parsed, nothing to do
             return Ok(());
         }
 
         // Load the image
-        let file_path = self.full_path(config);
-        println!("Parsing metadata for photo {}...", file_path.display());
-        let img = image::io::Reader::open(&file_path)
-            .map_err(|e| Error::FileError(e, file_path.clone()))?
+        println!("Parsing metadata for photo {}...", self.full_path.display());
+        let img = image::io::Reader::open(&self.full_path)
+            .map_err(|e| Error::FileError(e, self.full_path.clone()))?
             .decode()
-            .map_err(|e| Error::ImageError(e, file_path.clone()))?;
+            .map_err(|e| Error::ImageError(e, self.full_path.clone()))?;
 
         // Image dimensions
         self.width = img.width();
@@ -82,7 +74,7 @@ impl Photo {
         let img_rgb8 = match img {
             image::DynamicImage::ImageRgb8(pixels) => pixels,
             _ => {
-                eprintln!("Warning : converting \"{}\" from {:?} to RGB8, this is not efficient", file_path.display(), img.color());
+                eprintln!("Warning : converting \"{}\" from {:?} to RGB8, this is not efficient", self.full_path.display(), img.color());
                 img.into_rgb8()
             }
         };
@@ -104,11 +96,11 @@ impl Photo {
         self.color = format!("{:02x}{:02x}{:02x}", average_r / darken_factor, average_g / darken_factor, average_b / darken_factor);
 
         // Parse EXIF metadata
-        if config.READ_EXIF {
-            if let Err(Error::EXIFParserError(error, _)) = self.parse_exif(config) {
+        if read_exif {
+            if let Err(Error::EXIFParserError(error, _)) = self.parse_exif() {
                 match error {
                     exif::Error::NotFound(_) => (), // Ignore
-                    _ => eprintln!("Warning : unable to parse EXIF data from \"{}\" : {}", file_path.display(), error),
+                    _ => eprintln!("Warning : unable to parse EXIF data from \"{}\" : {}", &self.full_path.display(), error),
                 }
             }
         }
@@ -118,7 +110,7 @@ impl Photo {
     }
 
     /// Try to parse exif metadata
-    pub fn parse_exif(&mut self, config: &Config) -> Result<(), Error> {
+    pub fn parse_exif(&mut self) -> Result<(), Error> {
         fn remove_quotes(value: String) -> String {
             let mut value = value.clone();
             if value.starts_with("\"") {
@@ -130,15 +122,13 @@ impl Photo {
             value
         }
 
-        let file_path = self.full_path(config);
-
         // Read the EXIF data from the file
-        let exif_file = std::fs::File::open(&file_path)
-            .map_err(|e| Error::FileError(e, file_path.clone()))?;
+        let exif_file = std::fs::File::open(&self.full_path)
+            .map_err(|e| Error::FileError(e, self.full_path.clone()))?;
         let mut buf_reader = std::io::BufReader::new(&exif_file);
         let exif_reader = exif::Reader::new();
         let exif = exif_reader.read_from_container(&mut buf_reader)
-            .map_err(|e| Error::EXIFParserError(e, file_path.clone()))?;
+            .map_err(|e| Error::EXIFParserError(e, self.full_path.clone()))?;
         
         // Add every relevant available fields to the photo object
         if let Some(field) = exif.get_field(exif::Tag::DateTimeDigitized, exif::In::PRIMARY) {
@@ -170,11 +160,25 @@ impl Photo {
     }
 
     /// Create a resized version of this photo in the cache folder
-    async fn create_resized(&self, resized_file_path: &PathBuf, resized_type: ResizedType, config: &Config) -> Result<(), Error> {
-        // Extract parameter from the config
-        let file_path = self.full_path(config);
+    async fn create_resized(&self, resized_type: ResizedType, config: &Config) -> Result<PathBuf, Error> {
         let max_size = resized_type.max_size(config);
         let quality = resized_type.quality(config);
+        self.create_resized_from_params(resized_type, config.CACHE_DIR.clone(), max_size, quality).await
+    }
+
+    async fn create_resized_from_params(&self, resized_type: ResizedType, cache_dir: String, max_size: usize, quality: usize) -> Result<PathBuf, Error> {
+        // Path of the resized version of this photo in the cache folder
+        let mut resized_file_path = PathBuf::from(&cache_dir);
+        resized_file_path.push(&self.path);
+        resized_file_path.push(format!("{}_{}.jpg", resized_type.prefix(), &self.uid));
+
+        // Check if the file already exists
+        if resized_file_path.exists() {
+            return Ok(resized_file_path);
+        }
+
+        // Extract parameter from the config
+        let file_path = &self.full_path;
         println!("Generating resized version ({}, max {}x{}, quality {}%) of \"{}\" in the cache directory... ",
             resized_type.prefix(),
             max_size, max_size, quality,
@@ -182,7 +186,7 @@ impl Photo {
         );
     
         // Make sure the directory exists in the cache folder
-        let cache_dir = PathBuf::from(&config.CACHE_DIR);
+        let cache_dir = PathBuf::from(&cache_dir);
         let dir_path = PathBuf::from(resized_file_path.parent().unwrap_or_else(|| &cache_dir));
         if !dir_path.is_dir() {
             create_dir_all(&dir_path).await
@@ -207,7 +211,7 @@ impl Photo {
         // Create the JPEG encoder with the configured quality
         // Note that this uses the standard fs API, as opposed to tokio's async API, because the encoder is not compatible
         // the async equivalent of Writer
-        let file = std::fs::File::create(resized_file_path)
+        let file = std::fs::File::create(&resized_file_path)
             .map_err(|e| Error::FileError(e, resized_file_path.clone()))?;
         let writer = std::io::BufWriter::new(file);
         let mut encoder = JpegEncoder::new_with_quality(
@@ -222,7 +226,7 @@ impl Photo {
         encoder.encode_image(&img_resized)
             .map_err(|e| Error::ImageError(e, file_path.clone()))?;
         
-        Ok(())
+        Ok(resized_file_path)
     }
 }
 
@@ -372,15 +376,8 @@ impl Gallery {
     pub async fn get_resized_from_uid(&self, uid: &UID, resized_type: ResizedType, config: &Config) -> Result<Option<(Photo, PathBuf)>, Error> {
         match self.get_from_uid(uid).await {
             Some(photo) => {
-                // Path of the resized version of this photo in the cache folder
-                let mut resized_file_path = PathBuf::from(&config.CACHE_DIR);
-                resized_file_path.push(&photo.path);
-                resized_file_path.push(format!("{}_{}.jpg", resized_type.prefix(), &photo.uid));
-    
                 // Generate this file if it doesn't exist
-                if !resized_file_path.is_file() {
-                    photo.create_resized(&resized_file_path, resized_type, config).await?;
-                }
+                let resized_file_path = photo.create_resized(resized_type, config).await?;
     
                 Ok(Some((photo, resized_file_path)))
             }
@@ -441,16 +438,20 @@ impl Gallery {
             // Get the list of photos saved in the database for this path exactly
             let sort_columns = String::from(subdir_config.get("SORT_ORDER").and_then(|v| v.as_str()).unwrap_or(&default_config.SORT_ORDER))
                 .split(",").map(|s| String::from(s.trim())).collect::<Vec<String>>();
-            let photos_in_db = db::get_photos_in_path(db_conn, &rel_path, &sort_columns).await?;
+            let photos_in_db = db::get_photos_in_path(db_conn, &rel_path, &sort_columns, main_config).await?;
 
             // Find photos in the filesystem that are not in the database yet
             if let Some(ref mut photos_to_insert) = photos_to_insert {
                 let filenames_in_db = photos_in_db.iter().map(|photo| &photo.filename).collect::<Vec<&String>>();
                 for filename in &filenames_in_fs {
                     if !filenames_in_db.contains(&filename) {
+                        let mut full_path = PathBuf::from(&main_config.PHOTOS_DIR);
+                        full_path.push(&rel_path);
+                        full_path.push(&filename);
                         photos_to_insert.push(Photo {
                             path: rel_path.clone(),
                             filename: filename.clone(),
+                            full_path,
                             ..Default::default()
                         });
                     }
@@ -652,7 +653,7 @@ impl Gallery {
                 }
             }
             if !deleted_paths.is_empty() {
-                let photos_in_deleted_paths = db::get_photos_in_paths(db_conn, &deleted_paths).await?;
+                let photos_in_deleted_paths = db::get_photos_in_paths(db_conn, &deleted_paths, &config).await?;
                 for photo in photos_in_deleted_paths {
                     photos_to_remove.push(photo);
                 }
@@ -665,7 +666,7 @@ impl Gallery {
             let n = photos_to_insert.len();
             let mut last_percent: usize = 0;
             for (i, photo) in photos_to_insert.iter_mut().enumerate() {
-                photo.md5 = calculate_file_md5(&photo.full_path(config)).await?;
+                photo.md5 = calculate_file_md5(&photo.full_path).await?;
                 let percent: usize = (i + 1) * 100 / n;
                 if percent > last_percent {
                     print!("\rCalculating MD5 hashes of {} new files... {}%", n, percent);
@@ -692,30 +693,74 @@ impl Gallery {
             photos_to_remove.retain(|photo| !duplicate_hashes.contains(&photo.md5));
         }
 
+        // If there were some modifications to the photos we will need to reload the photos
+        let need_to_reload = !photos_to_insert.is_empty() || !photos_to_remove.is_empty() || !photos_to_move.is_empty();
+
         // Apply detected modifications (photos added, moved, or deleted) to the database
         if !photos_to_insert.is_empty() {
-            // For each photo to insert...
+            // Generate a new UID for each photo
             for photo in photos_to_insert.iter_mut() {
-                // Generate a new UID
                 photo.uid = UID::new(&existing_uids);
                 existing_uids.push(photo.uid.clone());
+            }
 
-                // Parse its metadata
-                if let Err(error) = photo.parse_metadata(config).await {
-                    eprintln!("Error : unable to open \"{}/{}\" : {}", photo.path.to_string_lossy(), photo.filename, error);
+            // Parse the photos' metadata and, if set in the config, generate their thumbnails
+            let pre_generate_thumbnails = config.PRE_GENERATE_THUMBNAILS;
+            let thumbnail_max_size = ResizedType::THUMBNAIL.max_size(config);
+            let thumbnail_quality = ResizedType::THUMBNAIL.quality(config);
+            let large_size_max_size = ResizedType::LARGE.max_size(config);
+            let large_size_quality = ResizedType::LARGE.quality(config);
+            let mut photos_to_insert_in_db: Vec<Photo> = Vec::new();
+            while !photos_to_insert.is_empty() {
+                // Spawn background tasks to parallelize computation, up to the LOADING_WORKERS setting in the config
+                let mut counter = 0;
+                let mut tasks = Vec::with_capacity(config.LOADING_WORKERS);
+                while let Some(mut photo) = photos_to_insert.pop() {
+                    // Background task which takes ownership of the photo object
+                    let cache_dir = config.CACHE_DIR.clone();
+                    tasks.push(tokio::spawn( async move {
+                        // Parse the metadata
+                        photo.parse_metadata(true).await
+                            .or_else(|e| {
+                                eprintln!("Error : unable to open \"{}/{}\" : {}", photo.path.to_string_lossy(), photo.filename, e);
+                                Err(e)
+                            }).ok(); // Ignore error after printing it
+                        
+                        // Generate thumbnails
+                        if pre_generate_thumbnails {
+                            photo.create_resized_from_params(ResizedType::THUMBNAIL, cache_dir.clone(), thumbnail_max_size, thumbnail_quality).await.ok();
+                            photo.create_resized_from_params(ResizedType::LARGE, cache_dir.clone(), large_size_max_size, large_size_quality).await.ok();
+                        }
+
+                        // Return ownership of the photo to the main thread
+                        photo
+                    }));
+
+                    counter += 1;
+                    if counter >= config.LOADING_WORKERS {
+                        // We have enough workers for now
+                        break;
+                    }
+                }
+
+                // Wait for the background tasks to finish
+                for task in tasks.into_iter().rev() {
+                    if let Ok(photo) = task.await {
+                        photos_to_insert_in_db.push(photo);
+                    }
                 }
             }
 
             // Log the list of photos to insert
             println!("Inserting {} photo(s) into the database : {}",
-                    photos_to_insert.len(),
-                    photos_to_insert.iter()
+                    photos_to_insert_in_db.len(),
+                    photos_to_insert_in_db.iter()
                         .map(|photo| format!("\"{}/{}\"", photo.path.to_string_lossy(), photo.filename))
                         .collect::<Vec<String>>().join(", ")
             );
 
             // Insert them into the database
-            db::insert_photos(db_conn, &photos_to_insert).await?;
+            db::insert_photos(db_conn, &photos_to_insert_in_db).await?;
         }
         if !photos_to_remove.is_empty() {
             // Log the list of photos to remove
@@ -742,8 +787,8 @@ impl Gallery {
             db::move_photos(db_conn, &photos_to_move).await?;
         }
 
-        // If there were some modifications to the photos, reload the database now that it has been updated
-        if !photos_to_insert.is_empty() || !photos_to_remove.is_empty() || !photos_to_move.is_empty() {
+        // Reload if required
+        if need_to_reload {
             self.clear().await;
             self.load_rec(
                 &full_path, &rel_path, db_conn,

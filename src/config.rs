@@ -169,9 +169,19 @@ pub struct Config {
     /// Default : "niobium_"
     #[serde(default="config_default_dowload_prefix")]
     pub DOWNLOAD_PREFIX: String,
+
+    /// If enabled, thumbnails will be generated immediately when the photos are loaded into
+    /// the database; otherwise they will be generated on demand when requested by a browser
+    /// for the first time.
+    /// Default : false
+    #[serde(default)]
+    pub PRE_GENERATE_THUMBNAILS: bool,
     
-    #[serde(default="config_default_true")]
-    pub BEHIND_REVERSE_PROXY: bool,
+    /// Number of parallel worker tasks that will be spawned when loading new photos into the
+    /// database.
+    /// Default : 16
+    #[serde(default="config_default_loading_workers")]
+    pub LOADING_WORKERS: usize,
 
     // Only for subdirs :
     
@@ -384,4 +394,8 @@ fn config_default_large_view_quality() -> usize {
 
 fn config_default_dowload_prefix() -> String {
     "niobium_".to_string()
+}
+
+fn config_default_loading_workers() -> usize {
+    16
 }

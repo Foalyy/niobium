@@ -175,7 +175,7 @@ async fn get_resized(uid: &UID, resized_type: photos::ResizedType, gallery: &Gal
             match NamedFile::open(&resized_file_path).await {
                 Ok(file) => PageResult::Photo(file),
                 Err(error) => {
-                    eprintln!("Error : unable to read or create cache file for \"{}\" at \"{}\" : {}", photo.full_path(config).display(), resized_file_path.display(), error);
+                    eprintln!("Error : unable to read or create cache file for \"{}\" at \"{}\" : {}", photo.full_path.display(), resized_file_path.display(), error);
                     PageResult::Err(())
                 }
             }
@@ -195,11 +195,10 @@ async fn get_photo(uid: UID, gallery: &State<Gallery>, config: &State<Config>) -
     match gallery.get_from_uid(&uid).await {
         Some(photo) => {
             // Try to open the file
-            let full_path = photo.full_path(config);
-            match NamedFile::open(&full_path).await {
+            match NamedFile::open(&photo.full_path).await {
                 Ok(file) => PageResult::Photo(file),
                 Err(error) => {
-                    eprintln!("Error : unable to read file \"{}\" : {}", full_path.display(), error);
+                    eprintln!("Error : unable to read file \"{}\" : {}", photo.full_path.display(), error);
                     PageResult::Err(())
                 }
             }
@@ -215,11 +214,10 @@ async fn download_photo(uid: UID, gallery: &State<Gallery>, config: &State<Confi
     match gallery.get_from_uid(&uid).await {
         Some(photo) => {
             // Try to open the file
-            let full_path = photo.full_path(config);
-            match DownloadedNamedFile::open(&full_path, &photo.uid, &config).await {
+            match DownloadedNamedFile::open(&photo.full_path, &photo.uid, &config).await {
                 Ok(file) => PageResult::PhotoDownload(file),
                 Err(error) => {
-                    eprintln!("Error : unable to read file \"{}\" : {}", full_path.display(), error);
+                    eprintln!("Error : unable to read file \"{}\" : {}", photo.full_path.display(), error);
                     PageResult::Err(())
                 }
             }
