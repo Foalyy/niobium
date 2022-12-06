@@ -35,7 +35,7 @@ impl Split for PathBuf {
         self.components()
             .map(|c|
                 if let Component::Normal(c) = c {
-                    c.to_str().unwrap().to_string()
+                    c.to_string_lossy().to_string()
                 } else {
                     "".to_string()
                 }
@@ -66,7 +66,7 @@ impl NavData {
         if keep_parent_open {
             open_subdir = path_split.pop().map(|s| s.to_owned());
             current = path_split.last().map(|s| s.clone()).unwrap_or("/".to_string());
-            path_current = path_parent.unwrap().to_path_buf();
+            path_current = path_parent.unwrap_or_default().to_path_buf();
             path_parent = path_current.parent().map(|p| p.to_path_buf());
             is_root = path_parent.is_none();
             subdirs = photos::list_subdirs(&path_current, &config.PHOTOS_DIR, false, true).await?;

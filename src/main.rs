@@ -9,15 +9,17 @@ mod uid;
 use config::Config;
 use db::DB;
 use nav_data::NavData;
+use photos::{Gallery, Photo};
 use rocket::fairing::AdHoc;
+use rocket::response::Redirect;
 use uid::UID;
 use rocket::fs::NamedFile;
 use rocket::http::Header;
 use rocket::{fs::FileServer, State};
 use rocket_dyn_templates::{Template, context};
-use rocket_db_pools::{Connection, sqlx, Database};
+use rocket_db_pools::{sqlx, Database, Connection};
 use std::net::IpAddr;
-use std::time::Instant;
+use std::ops::Deref;
 use std::{io, fmt::Display};
 use std::path::{PathBuf, Path};
 
@@ -51,13 +53,15 @@ async fn rocket() -> _ {
             get_large,
             get_photo,
             download_photo,
+            reload,
         ])
         .mount("/static", FileServer::from("static/").rank(0))
         .attach(Template::fairing())
         .attach(DB::init())
         .attach(AdHoc::try_on_ignite("Database schema init", db::init_schema))
         .manage(config)
-        .attach(AdHoc::try_on_ignite("Photos init", photos::init_load))
+        .manage(Gallery::new())
+        .attach(AdHoc::try_on_ignite("Photos init", photos::init))
         .attach(AdHoc::on_liftoff("Startup message", move |_| Box::pin(async move {
             println!("## Niobium started on {}:{}", address, port);
         })))
@@ -66,103 +70,52 @@ async fn rocket() -> _ {
 
 /// Route handler called to render the main layout of the gallery
 #[get("/<path..>", rank=15)]
-async fn get_gallery(path: PathBuf, config: &State<Config>) -> PageResult {
-    // Check the requested path
-    match photos::check_path(&path, &config.inner()) {
-        Ok(_full_path) => {
-            // Path looks valid, render the template
-            match NavData::from_path(&path, &config).await {
-                Ok(nav_data) => PageResult::Page(Template::render("main", context! {
-                    config: config.inner(),
-                    nav: nav_data,
-                    uid_chars: UID::CHARS,
-                    uid_length: UID::LENGTH,
-                    load_grid_url: uri!(get_grid(&path, None as Option<usize>, None as Option<usize>, None as Option<UID>)).to_string(),
-                    load_nav_url: uri!(get_nav(&path)).to_string(),
-                })),
-                Err(error) => {
-                    eprintln!("Error : unable to generate nav data for \"{}\" : {}", path.display(), error);
-                    PageResult::Err(())
-                }
+async fn get_gallery(path: PathBuf, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
+    if gallery.path_exists(&path).await {
+        // This path exists in the gallery, calculate the content of the nav panel
+        match NavData::from_path(&path, &config).await {
+            // Render the template
+            Ok(nav_data) => PageResult::Page(Template::render("main", context! {
+                config: config.inner(),
+                nav: nav_data,
+                uid_chars: UID::CHARS,
+                uid_length: UID::LENGTH,
+                load_grid_url: uri!(get_grid(&path, None as Option<usize>, None as Option<usize>, None as Option<UID>)).to_string(),
+                load_nav_url: uri!(get_nav(&path)).to_string(),
+            })),
+            Err(error) => {
+                eprintln!("Error : unable to generate nav data for \"{}\" : {}", path.display(), error);
+                PageResult::Err(())
             }
         }
-
-        // The path is either not found or invalid for the current config, return the 404 template
-        Err(Error::FileError(error, _)) if error.kind() == io::ErrorKind::NotFound => page_404(&config),
-
-        // For any other error, forward it to the 500 Internal Error catcher
-        Err(error) => {
-            eprintln!("Error : unable to load the gallery at \"{}\" : {}", path.display(), error);
-            PageResult::Err(())
-        }
+    } else {
+        page_404(&config)
     }
 }
 
 
 /// Route handler called by javascript to return the grid items for the given path and parameters
 #[get("/<path..>?grid&<start>&<count>&<uid>", rank=10)]
-async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid: Option<UID>, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
-    let now = Instant::now();
-    
-    // Try to load the photos in the given path
-    match photos::load(&path, config, &mut db_conn).await {
+async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid: Option<UID>, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
+    // Try to obtain a read pointer to some photos in this path in the gallery based on the request parameters
+    match gallery.read(&path, start, count, uid).await {
 
         // We have a valid (possibly empty) list of photos, render it as a template
-        Ok(mut photos) => {
-            println!("Finished loading in {}ms", now.elapsed().as_millis());
-            let n_photos = photos.len();
-
-            // Add the load url to each photo
-            for photo in photos.iter_mut() {
-                photo.get_grid_item_url = uri!(get_grid_item(&photo.uid)).to_string();
-            }
-
-            // Filter the results
-            let mut photos_filtered = photos.as_mut_slice();
-            if let Some(uid) = uid {
-                // Only return a single UID if requested
-                if let Some(idx) = photos_filtered.iter().position(|p| p.uid == uid) {
-                    photos_filtered = &mut photos[idx..=idx]
-                }
-
-            } else {
-                // Only return a subset if requested
-                let mut start = start.unwrap_or(0);
-                let mut count = count.unwrap_or(n_photos);
-                if start >= n_photos {
-                    start = 0;
-                }
-                if start + count > n_photos {
-                    count = n_photos - start;
-                }
-                photos_filtered = &mut photos[start..start+count];
-            }
-
-            // If the requested set is small enough, calculate the image sizes to improve the first display
-            if photos_filtered.len() <= 100 {
-                for photo in photos_filtered.iter_mut() {
-                    let result = photo.parse_metadata(&config, &mut db_conn).await;
-                    if let Err(error) = result {
-                        eprintln!("Warning : unable to parse metadata of photo {} : {}", photo.full_path(&config).display(), error);
-                    }
-                }
-            }
+        Some(gallery_lock) => {
+            // Convert the sublist of photos to a Vec with individual index and URLs
+            let photos = gallery_lock.as_slice().iter().enumerate()
+                .map(|(index, photo_pointer)| (gallery_lock.start + index, photo_pointer.deref(), uri!(get_grid_item(&photo_pointer.uid)).to_string()))
+                .collect::<Vec<(usize, &Photo, String)>>();
 
             PageResult::Page(Template::render("grid", context! {
                 config: &config.inner(),
-                photos: &photos_filtered,
-                n_photos: n_photos,
+                photos: &photos,
+                n_photos: gallery_lock.total,
             }))
         }
 
         // The path is either not found or invalid for the current config, return the 404 template
-        Err(Error::FileError(file_error, _)) if file_error.kind() == io::ErrorKind::NotFound => page_404(&config),
-
-        // For any other error, forward it to the 500 Internal Error catcher
-        Err(error) => {
-            eprintln!("Error : unable to load the photos grid at \"{}\" : {}", path.display(), error);
-            PageResult::Err(())
-        }
+        None => page_404(&config),
     }
 }
 
@@ -184,43 +137,39 @@ async fn get_nav(path: PathBuf, config: &State<Config>) -> PageResult {
 
 
 /// Route handler called asynchronously to render a single photo inside the grid
-#[get("/<uid>/grid-item", rank=1)]
-async fn get_grid_item(uid: UID, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
-    match photos::get_from_uid(&uid, config, &mut db_conn).await {
-        Ok(Some(photo)) => PageResult::Page(Template::render("grid-item", context! {
+#[get("/<uid>/grid-item", rank=2)]
+async fn get_grid_item(uid: UID, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
+    match gallery.get_from_uid(&uid).await {
+        Some(photo) => PageResult::Page(Template::render("grid-item", context! {
             config: &config.inner(),
-            photo: &photo,
+            photo: photo,
             url_get_thumbnail: uri!(get_thumbnail(&uid)),
             url_get_large: uri!(get_large(&uid)),
             url_get_photo: uri!(get_photo(&uid)),
             url_download_photo:uri!(download_photo(&uid)),
         })),
-        Ok(None) => page_404(&config),
-        Err(error) => {
-            eprintln!("Error : unable to render a grid item for UID #{} : {}", uid, error);
-            PageResult::Err(())
-        }
+        None => page_404(&config),
     }
 }
 
 
 /// Route handler that returns the thumbnail version of the requested UID
-#[get("/<uid>/thumbnail", rank=2)]
-async fn get_thumbnail(uid: UID, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
-    get_resized(&uid, photos::ResizedType::THUMBNAIL, &config, &mut db_conn).await
+#[get("/<uid>/thumbnail", rank=3)]
+async fn get_thumbnail(uid: UID, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
+    get_resized(&uid, photos::ResizedType::THUMBNAIL, &gallery, &config).await
 }
 
 
 /// Route handler that returns the large resized version of the requested UID
-#[get("/<uid>/large", rank=3)]
-async fn get_large(uid: UID, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
-    get_resized(&uid, photos::ResizedType::LARGE, &config, &mut db_conn).await
+#[get("/<uid>/large", rank=4)]
+async fn get_large(uid: UID, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
+    get_resized(&uid, photos::ResizedType::LARGE, &gallery, &config).await
 }
 
 
 /// Returns the resized version of the requested UID for the given prefix
-async fn get_resized(uid: &UID, resized_type: photos::ResizedType, config: &Config, db_conn: &mut Connection<DB>) -> PageResult {
-    match photos::get_resized_from_uid(uid, resized_type, config, db_conn).await {
+async fn get_resized(uid: &UID, resized_type: photos::ResizedType, gallery: &Gallery, config: &Config) -> PageResult {
+    match gallery.get_resized_from_uid(uid, resized_type, config).await {
         Ok(Some((photo, resized_file_path))) => {
             // Try to open the file
             match NamedFile::open(&resized_file_path).await {
@@ -241,10 +190,10 @@ async fn get_resized(uid: &UID, resized_type: photos::ResizedType, config: &Conf
 
 
 /// Route handler that returns the photo file for the requested UID
-#[get("/<uid>", rank=5)]
-async fn get_photo(uid: UID, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
-    match photos::get_from_uid(&uid, config, &mut db_conn).await {
-        Ok(Some(photo)) => {
+#[get("/<uid>", rank=6)]
+async fn get_photo(uid: UID, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
+    match gallery.get_from_uid(&uid).await {
+        Some(photo) => {
             // Try to open the file
             let full_path = photo.full_path(config);
             match NamedFile::open(&full_path).await {
@@ -255,20 +204,16 @@ async fn get_photo(uid: UID, config: &State<Config>, mut db_conn: Connection<DB>
                 }
             }
         }
-        Ok(None) => page_404(&config),
-        Err(error) => {
-            eprintln!("Error : unable to return a photo for UID #{} : {}", uid, error);
-            PageResult::Err(())
-        }
+        None => page_404(&config),
     }
 }
 
 
 /// Route handler that returns the photo file for the requested UID as a download
-#[get("/<uid>/download", rank=4)]
-async fn download_photo(uid: UID, config: &State<Config>, mut db_conn: Connection<DB>) -> PageResult {
-    match photos::get_from_uid(&uid, config, &mut db_conn).await {
-        Ok(Some(photo)) => {
+#[get("/<uid>/download", rank=5)]
+async fn download_photo(uid: UID, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
+    match gallery.get_from_uid(&uid).await {
+        Some(photo) => {
             // Try to open the file
             let full_path = photo.full_path(config);
             match DownloadedNamedFile::open(&full_path, &photo.uid, &config).await {
@@ -279,12 +224,17 @@ async fn download_photo(uid: UID, config: &State<Config>, mut db_conn: Connectio
                 }
             }
         }
-        Ok(None) => page_404(&config),
-        Err(error) => {
-            eprintln!("Error : unable to return a photo as a download for UID #{} : {}", uid, error);
-            PageResult::Err(())
-        }
+        None => page_404(&config),
     }
+}
+
+
+/// Route handler that reloads the photos from the filesystem and sync them with the database
+/// TODO : add a cooldown timer to prevent DOS attempts through this computation-heavy endpoint
+#[get("/.reload", rank=1)]
+async fn reload(gallery: &State<Gallery>, config: &State<Config>, mut db_conn: Connection<DB>) -> Result<Redirect, ()> {
+    gallery.reload(config, &mut db_conn).await.map_err(|_| ())?;
+    Ok(Redirect::to(uri!(get_gallery(PathBuf::new()))))
 }
 
 

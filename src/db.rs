@@ -85,14 +85,10 @@ pub async fn get_existing_uids(db_conn: &mut PoolConnection<Sqlite>) -> Result<V
 }
 
 
-/// Get the list of unique paths known in the database that start with the given path
-pub async fn get_paths_starting_with(db_conn: &mut PoolConnection<Sqlite>, path: &PathBuf) -> Result<Vec<PathBuf>, Error> {
-    let path_str = path.to_str().ok_or_else(|| Error::InvalidRequestError(path.clone()))?;
-
+/// Get the list of unique paths known in the database
+pub async fn get_all_paths(db_conn: &mut PoolConnection<Sqlite>) -> Result<Vec<PathBuf>, Error> {
     Ok(
-        sqlx::query("SELECT path FROM photo WHERE SUBSTR(path, 1, ?)=? GROUP BY path;")
-            .bind(path_str.chars().count() as u32)
-            .bind(path_str)
+        sqlx::query("SELECT path FROM photo GROUP BY path;")
             .fetch_all(db_conn).await
             .and_then(|rows| Ok(
                 // Convert the list of rows into a list of PathBuf's, excluding invalid inputs from the result
@@ -113,7 +109,7 @@ pub async fn get_photos_in_paths(db_conn: &mut PoolConnection<Sqlite>, paths: &V
         let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT * FROM photo WHERE path IN (");
         let mut separated = query_builder.separated(", ");
         for path in batch {
-            separated.push_bind(path.to_str().ok_or_else(|| Error::InvalidRequestError(path.clone()))?);
+            separated.push_bind(path.to_string_lossy());
         }
         separated.push_unseparated(");");
         let query = query_builder.build();
@@ -126,7 +122,7 @@ pub async fn get_photos_in_paths(db_conn: &mut PoolConnection<Sqlite>, paths: &V
 /// Get the list of photos known in the database that are registered in the given path, ordered
 pub async fn get_photos_in_path(db_conn: &mut PoolConnection<Sqlite>, path: &PathBuf, sort_columns: &Vec<String>) -> Result<Vec<Photo>, Error> {
     let mut query_builder = QueryBuilder::new("SELECT * FROM photo WHERE path=");
-    query_builder.push_bind(path.to_str().ok_or_else(|| Error::InvalidRequestError(path.clone()))?);
+    query_builder.push_bind(path.to_string_lossy());
     query_builder.push(" ORDER BY ");
     let mut separated = query_builder.separated(", ");
     for col in sort_columns {
@@ -159,33 +155,53 @@ async fn get_photos_from_query<'q>(db_conn: &mut PoolConnection<Sqlite>, query: 
 }
 
 
-/// Get a single photo based on its UID
-pub async fn get_photo(db_conn: &mut PoolConnection<Sqlite>, uid: &UID) -> Result<Option<Photo>, Error> {
-    Ok(
-        sqlx::query("SELECT * FROM photo WHERE uid=? LIMIT 1;")
-            .bind(uid.to_string())
-            .try_map(|row: SqliteRow| -> Result<Photo, sqlx::Error> {
-                row_to_photo(&row)
-                    .or_else(|e| {
-                        eprintln!("Warning : database error : unable to decode a photo : {}", e);
-                        Err(e)
-                    })
-            })
-            .fetch_optional(db_conn).await?
-    )
-}
-
-
 /// Insert a list of photos into the database
 pub async fn insert_photos(db_conn: &mut PoolConnection<Sqlite>, photos: &Vec<Photo>) -> Result<(), Error> {
     // Insert photos by batches of up to 100
     for batch in photos.chunks(100) {
-        let mut query_builder = QueryBuilder::new("INSERT INTO photo(filename, path, uid, md5) ");
+        let mut query_builder = QueryBuilder::new("
+            INSERT INTO photo(
+                filename,
+                path,
+                uid,
+                md5,
+                sort_order,
+                hidden,
+                metadata_parsed,
+                width,
+                height,
+                color,
+                title,
+                place,
+                date_taken,
+                camera_model,
+                lens_model,
+                focal_length,
+                aperture,
+                exposure_time,
+                sensitivity
+        ) ");
         query_builder.push_values(batch, |mut builder, photo| {
-            builder.push_bind(&photo.filename)
-                .push_bind(photo.path.to_str().unwrap())
+            builder
+                .push_bind(&photo.filename)
+                .push_bind(photo.path.to_string_lossy())
                 .push_bind(photo.uid.to_string())
-                .push_bind(&photo.md5);
+                .push_bind(&photo.md5)
+                .push_bind(photo.sort_order)
+                .push_bind(photo.hidden)
+                .push_bind(photo.metadata_parsed)
+                .push_bind(photo.width)
+                .push_bind(photo.height)
+                .push_bind(&photo.color)
+                .push_bind(&photo.title)
+                .push_bind(&photo.place)
+                .push_bind(&photo.date_taken)
+                .push_bind(&photo.camera_model)
+                .push_bind(&photo.lens_model)
+                .push_bind(&photo.focal_length)
+                .push_bind(&photo.aperture)
+                .push_bind(&photo.exposure_time)
+                .push_bind(&photo.sensitivity);
         });
         let query = query_builder.build();
         query.execute(&mut *db_conn).await?;
@@ -216,65 +232,11 @@ pub async fn move_photos(db_conn: &mut PoolConnection<Sqlite>, photos_pairs: &Ve
     for photos_pair in photos_pairs {
         sqlx::query("UPDATE photo SET filename=?, path=? WHERE uid=?;")
             .bind(&photos_pair.1.filename)
-            .bind(&photos_pair.1.path.to_str().unwrap())
+            .bind(&photos_pair.1.path.to_string_lossy())
             .bind(&photos_pair.0.uid.to_string())
             .execute(&mut *db_conn).await?;
     }
     Ok(())
-}
-
-
-/// Update a photo in the database based on its UID
-pub async fn update_photo(db_conn: &mut PoolConnection<Sqlite>, photo: &Photo) -> Result<(), Error> {
-    let sql = "
-        UPDATE photo SET
-            filename=?,
-            path=?,
-            md5=?,
-            sort_order=?,
-            hidden=?,
-            metadata_parsed=?,
-            width=?,
-            height=?,
-            color=?,
-            title=?,
-            place=?,
-            date_taken=?,
-            camera_model=?,
-            lens_model=?,
-            focal_length=?,
-            aperture=?,
-            exposure_time=?,
-            sensitivity=?
-        WHERE uid=?;
-    ";
-    sqlx::query(sql)
-        .bind(&photo.filename)
-        .bind(photo.path.to_str().unwrap())
-        .bind(&photo.md5)
-        .bind(photo.sort_order)
-        .bind(photo.hidden)
-        .bind(photo.metadata_parsed)
-        .bind(photo.width)
-        .bind(photo.height)
-        .bind(&photo.color)
-        .bind(&photo.title)
-        .bind(&photo.place)
-        .bind(&photo.date_taken)
-        .bind(&photo.camera_model)
-        .bind(&photo.lens_model)
-        .bind(&photo.focal_length)
-        .bind(&photo.aperture)
-        .bind(&photo.exposure_time)
-        .bind(&photo.sensitivity)
-        .bind(photo.uid.to_string())
-        .execute(db_conn).await
-        .map_err(|e| Error::DatabaseError(e))
-        .and_then(|r| if r.rows_affected() > 0 {
-            Ok(())
-        } else {
-            Err(Error::InvalidUIDError(photo.uid.clone()))
-        })
 }
 
 

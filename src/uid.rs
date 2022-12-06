@@ -8,7 +8,7 @@ use rocket::serde::Serialize;
 use crate::Error;
 
 
-#[derive(Default, Serialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Serialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct UID {
     uid: String,
 }
@@ -30,11 +30,13 @@ impl UID {
     pub fn new(existing_uids: &Vec<Self>) -> Self {
         let mut rng = thread_rng();
         loop {
-            let uid_string = Self::CHARS_BIASED.choose_multiple_weighted(&mut rng, Self::LENGTH as usize, |item| item.1).unwrap()
+            let uid_string = Self::CHARS_BIASED.choose_multiple_weighted(&mut rng, Self::LENGTH as usize, |item| item.1)
+                .expect("Error : invalid weight value for choose_multiple_weighted()")
                 .map(|item| String::from(item.0))
                 .collect::<Vec<String>>()
                 .join("");
-            let uid = Self::try_from(&uid_string).unwrap();
+            let uid = Self::try_from(&uid_string)
+                .expect("Error : invalid UID generated");
             if !existing_uids.contains(&uid) {
                 break uid;
             }

@@ -1,13 +1,16 @@
 use crate::config::Config;
 use crate::uid::UID;
 use crate::{Error, db};
+use std::collections::HashMap;
 use std::future::Future;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use md5::{Md5, Digest};
+use rocket::tokio::sync::{RwLock, RwLockReadGuard};
 use rocket::{Rocket, fairing};
 use rocket::serde::Serialize;
 use rocket::tokio::fs::create_dir_all;
@@ -44,8 +47,6 @@ pub struct Photo {
     pub aperture: String,
     pub exposure_time: String,
     pub sensitivity: String,
-    pub index: u32,
-    pub get_grid_item_url: String,
 }
 
 impl Photo {
@@ -59,7 +60,7 @@ impl Photo {
 
     /// Try to open the photo file to extract its metadata and store them in the database.
     /// If this has already been done according to the `metadata_parsed` field, this is a no-op.
-    pub async fn parse_metadata(&mut self, config: &Config, db_conn: &mut PoolConnection<Sqlite>) -> Result<(), Error> {
+    pub async fn parse_metadata(&mut self, config: &Config) -> Result<(), Error> {
         if self.metadata_parsed {
             // Metadata already parsed, nothing to do
             return Ok(());
@@ -81,7 +82,7 @@ impl Photo {
         let img_rgb8 = match img {
             image::DynamicImage::ImageRgb8(pixels) => pixels,
             _ => {
-                println!("Warning : converting \"{}\" from {:?} to RGB8, this is not efficient", file_path.display(), img.color());
+                eprintln!("Warning : converting \"{}\" from {:?} to RGB8, this is not efficient", file_path.display(), img.color());
                 img.into_rgb8()
             }
         };
@@ -107,13 +108,13 @@ impl Photo {
             if let Err(Error::EXIFParserError(error, _)) = self.parse_exif(config) {
                 match error {
                     exif::Error::NotFound(_) => (), // Ignore
-                    _ => eprintln!("Warning, unable to parse EXIF data from \"{}\" : {}", file_path.display(), error),
+                    _ => eprintln!("Warning : unable to parse EXIF data from \"{}\" : {}", file_path.display(), error),
                 }
             }
         }
 
         self.metadata_parsed = true;
-        db::update_photo(db_conn, &self).await
+        Ok(())
     }
 
     /// Try to parse exif metadata
@@ -209,7 +210,13 @@ impl Photo {
         let file = std::fs::File::create(resized_file_path)
             .map_err(|e| Error::FileError(e, resized_file_path.clone()))?;
         let writer = std::io::BufWriter::new(file);
-        let mut encoder = JpegEncoder::new_with_quality(writer, quality.try_into().unwrap());
+        let mut encoder = JpegEncoder::new_with_quality(
+            writer,
+            quality.try_into().unwrap_or_else(|_| {
+                eprintln!("Warning : invalid 'quality' value for JPEG encoder (must be between 10 and 100), falling back to 80");
+                80
+            })
+        );
         
         // Encode the image
         encoder.encode_image(&img_resized)
@@ -220,39 +227,196 @@ impl Photo {
 }
 
 
+pub type GalleryContent = HashMap<String, Vec<Arc<Photo>>>;
 
-/// Load all available photos in the photos folder and sync them with the database
-pub async fn load(path: &PathBuf, config: &Config, db_conn: &mut PoolConnection<Sqlite>) -> Result<Vec<Photo>, Error> {
+/// Thread-safe struct that holds a list of photos and allows them to be accessed efficiently once loaded
+/// This is supposed to be managed by Rocket
+pub struct Gallery {
+    gallery: RwLock<GalleryContent>,
+    photos: RwLock<HashMap<UID, Arc<Photo>>>,
+}
 
-    // Inner function used to load photos recursively
-    fn _load<'a>(full_path: &'a PathBuf, rel_path: &'a PathBuf, db_conn: &'a mut PoolConnection<Sqlite>, main_config: &'a Config, subdir_config: &'a toml::value::Table, default_config: &'a Config, displayed_photos: &'a mut Vec<Photo>, photos_to_insert: &'a mut Option<&mut Vec<Photo>>,
-            photos_to_remove: &'a mut Option<&mut Vec<Photo>>, paths_found: &'a mut Option<&mut Vec<PathBuf>>, is_subdir: bool) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>> {
+impl Gallery {
+
+    /// Create a new, empty gallery
+    pub fn new() -> Gallery {
+        Self {
+            gallery: RwLock::new(HashMap::new()),
+            photos: RwLock::new(HashMap::new()),
+        }
+    }
+
+
+    /// Total number of photos in the gallery
+    pub async fn len(&self) -> usize {
+        self.photos.read().await.len()
+    }
+
+
+    /// Remove every photo from the gallery
+    pub async fn clear(&self) {
+        let mut gallery_lock = self.gallery.write().await;
+        let mut photos_lock = self.photos.write().await;
+        gallery_lock.clear();
+        photos_lock.clear();
+    }
+
+
+    /// Reload the gallery. This will `clear()` then `load()`.
+    pub async fn reload(&self, config: &Config, db_conn: &mut PoolConnection<Sqlite>) -> Result<(), Error> {
+        self.clear().await;
+        println!("Reloading photos...");
+        let now = Instant::now();
+        match self.load(config, db_conn).await {
+            Ok(_) => {
+                println!("Loaded {} photos successfully in {}ms", self.len().await, now.elapsed().as_millis());
+                Ok(())
+            }
+            Err(error) => {
+                eprintln!("Error : unable to load photos : {}", error);
+                Err(error)
+            }
+        }
+    }
+
+
+    /// Insert an empty array at the given path if it doesn't already exist in the gallery
+    pub async fn insert_path(&self, path: &PathBuf) {
+        // If this path is not already in the hashmap, insert an empty vec at this key
+        // This is used to make sure that 
+        let mut gallery_lock = self.gallery.write().await;
+        gallery_lock.entry(path.to_string_lossy().into_owned())
+            .or_insert_with(|| Vec::new());
+    }
+
+
+    /// Check if the given path exists in the gallery
+    pub async fn path_exists(&self, path: &PathBuf) -> bool {
+        self.gallery.read().await.contains_key(&path.to_string_lossy().to_string())
+    }
+
+
+    /// Insert the given photo in the gallery at the given path. If this photo is already registered in the gallery for a given path,
+    /// it will not get duplicated, instead the smart pointer that will be inserted will point to the same Photo internally
+    async fn insert_photo(&self, path: &PathBuf, photo: &Photo) {
+        // If this photo has already been inserted somewhere in the gallery, it also has an Arc pointer stored in the `photos`
+        // hashmap that we can retreive efficiently; otherwise, create a new Arc and insert it into the hashmap
+        let mut photos_lock = self.photos.write().await;
+        let arc = photos_lock.entry(photo.uid.clone()).or_insert_with(|| Arc::new(photo.clone()));
+
+        // Create a clone of this Arc pointer to share the underlying Photo object
+        let photo_pointer = Arc::clone(arc);
+
+        // If this path has already been inserted in the gallery, retreive its Vec of Arc pointers to Photo objects; otherwise,
+        // create an empty Vec
+        let mut gallery_lock = self.gallery.write().await;
+        let vec = gallery_lock.entry(path.to_string_lossy().into_owned()).or_insert_with(|| Vec::new());
+
+        // Add this Arc pointer to the list of photos for this path in the gallery if it hasn't already been inserted
+        if !vec.iter().any(|p| p.uid == photo.uid) {
+            vec.push(photo_pointer);
+        }
+    }
+
+
+    /// Acquire a read lock on the gallery if the path exists, or return None otherwise. Use `as_slice()` on the return type to read the photos.
+    /// If the metadata of some of the requested photos hasn't been parsed, this will acquire a temporary write lock on the gallery
+    /// to perform this operation, which may take some time.
+    pub async fn read<'a>(&'a self, path: &'a PathBuf, start: Option<usize>, count: Option<usize>, uid: Option<UID>) -> Option<GalleryReadLock<'a>> {
+        let path = path.to_string_lossy().to_string();
+        
+        let gallery_read_lock = self.gallery.read().await;
+        if gallery_read_lock.contains_key(&path) {
+            let photos = gallery_read_lock.get(&path).unwrap();
+            let n_photos = photos.len();
+    
+            // Compute pagination
+            let mut start = start.unwrap_or(0);
+            let mut count = count.unwrap_or(n_photos);
+            if let Some(uid) = uid { // Only return a single UID if requested
+                if let Some(idx) = photos.iter().position(|p| p.uid == uid) {
+                    start = idx;
+                    count = 1;
+                }
+                // If the requested UID hasn't been found, ignore this constraint and return a list based on `start` and `count` if provided,
+                // or default values otherwise.
+            }
+            if start >= n_photos {
+                start = 0;
+            }
+            if start + count > n_photos {
+                count = n_photos - start;
+            }
+            if count > 100 { // Limit the maximum number of results to 100
+                count = 100;
+            }
+
+            // Return a read lock on the gallery that can be used to access the photos
+            Some(GalleryReadLock::new(gallery_read_lock, path, start, count, n_photos))
+
+        } else {
+            // This path is not found in the gallery
+            None
+        }
+    }
+
+
+    /// Return a copy of a single photo from the cache, based on its UID
+    pub async fn get_from_uid(&self, uid: &UID) -> Option<Photo> {
+        Some(Photo::clone(self.photos.read().await.get(uid)?))
+    }
+
+
+    /// Return a copy of a single photo from the cache based on its UID, with the path to its resized version,
+    /// after generating it if necessary
+    pub async fn get_resized_from_uid(&self, uid: &UID, resized_type: ResizedType, config: &Config) -> Result<Option<(Photo, PathBuf)>, Error> {
+        match self.get_from_uid(uid).await {
+            Some(photo) => {
+                // Path of the resized version of this photo in the cache folder
+                let mut resized_file_path = PathBuf::from(&config.CACHE_DIR);
+                resized_file_path.push(&photo.path);
+                resized_file_path.push(format!("{}_{}.jpg", resized_type.prefix(), &photo.uid));
+    
+                // Generate this file if it doesn't exist
+                if !resized_file_path.is_file() {
+                    photo.create_resized(&resized_file_path, resized_type, config).await?;
+                }
+    
+                Ok(Some((photo, resized_file_path)))
+            }
+            None => Ok(None),
+        }
+    }
+
+
+    // Private function used to load photos recursively
+    fn load_rec<'a>(
+            &'a self,
+            full_path: &'a PathBuf,
+            rel_path: &'a PathBuf,
+            db_conn: &'a mut PoolConnection<Sqlite>,
+            main_config: &'a Config,
+            configs_stack: &'a mut Vec<(PathBuf, Table)>,
+            default_config: &'a Config,
+            photos_to_insert: &'a mut Option<&mut Vec<Photo>>,
+            photos_to_remove: &'a mut Option<&mut Vec<Photo>>,
+            paths_found: &'a mut Option<&mut Vec<PathBuf>>
+        ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>>
+    {
         Box::pin(async move {
-            // True if this is the path actually requested by the user, not one of its subdirs opened recursively
-            let is_requested_root = !is_subdir;
-
             // Append this path to the list of paths found
             if let Some(paths_found) = paths_found {
                 paths_found.push(rel_path.clone());
             }
+            self.insert_path(&rel_path).await;
 
-            // Try to find a config file in this directory and append it to a copy of the current one (so it won't propagate to sibling directories)
-            let parent_config = subdir_config.clone();
-            let mut subdir_config = subdir_config.clone();
-            let this_subdir_config = Config::update_with_subdir(&full_path, &mut subdir_config);
-
-            // HIDDEN only applies to subdirectories, and a HIDDEN=false doesn't override a parent HIDDEN=true
-            if is_requested_root && subdir_config.contains_key("HIDDEN") {
-                subdir_config.remove("HIDDEN");
-            }
-            if is_subdir && parent_config.get("HIDDEN") == Some(&toml::value::Value::Boolean(true)) {
-                subdir_config.insert("HIDDEN".to_string(), toml::value::Value::Boolean(true));
-            }
-
-            // A SHOW_PHOTOS_FROM_SUBDIRS=false can't be overridden in a subdirectory
-            if is_subdir && parent_config.get("SHOW_PHOTOS_FROM_SUBDIRS") == Some(&toml::value::Value::Boolean(false)) {
-                subdir_config.insert("SHOW_PHOTOS_FROM_SUBDIRS".to_string(), toml::value::Value::Boolean(false));
-            }
+            // Try to find a config file in this directory, append it to a copy of the current one (so it won't propagate to
+            // sibling directories), and put it on the stack
+            let mut cfg = configs_stack.last().unwrap().1.clone();
+            cfg.remove("HIDDEN"); // This setting doesn't propagate from the parent
+            Config::update_with_subdir(&full_path, &mut cfg);
+            configs_stack.push((rel_path.clone(), cfg));
+            let subdir_config = &configs_stack.last().unwrap().1;
 
             // List the files inside this path in the photos directory
             let mut filenames_in_fs: Vec<String> = Vec::new();
@@ -359,39 +523,30 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &mut PoolConnection<
                 }
             }
 
-            // Check if a password is required for this path, and if so, if it has been provided
-            let is_password_ok = match subdir_config.get("PASSWORD") {
-                Some(value) => match value.as_str() {
-                    Some(_password) => {
-                        // TODO : check password in session
-                        true
-                    }
-                    None => {
-                        eprintln!("Invalid value for config parameter \"PASSWORD\" in path {}", rel_path.display());
-                        false // Forbid access by default
-                    }
+            // Add these photos to the gallery
+            // TODO : handle PASSWORD setting
+            if !photos_in_db.is_empty() {
+                // Add them to this path
+                for photo in &photos_in_db {
+                    self.insert_photo(rel_path, photo).await;
                 }
-                None => true, // Password not needed
-            };
 
-            // If this is a subdirectory, add these photos only if :
-            //   - the SHOW_PHOTOS_FROM_SUBDIRS config is enabled
-            //   - this directory is not hidden
-            //   - the password has been provided, if required
-            let mut added_to_displayed_photos: Vec<Photo> = Vec::new();
-            let show_photos_from_subdir = parent_config.get("SHOW_PHOTOS_FROM_SUBDIRS").and_then(|v| v.as_bool()).unwrap_or(default_config.SHOW_PHOTOS_FROM_SUBDIRS);
-            let hidden = subdir_config.get("HIDDEN").and_then(|v| v.as_bool()).unwrap_or(default_config.HIDDEN);
-            if is_requested_root || (show_photos_from_subdir && !hidden && is_password_ok) {
-                for photo in photos_in_db {
-                    if !photo.hidden {
-                        added_to_displayed_photos.push(photo);
+                // Add them recursively to the parent paths as long as SHOW_PHOTOS_FROM_SUBDIRS is set and HIDDEN isn't
+                for (path, entry_config) in configs_stack[1..configs_stack.len()-1].iter().rev() {
+                    let show_photos_from_subdir = entry_config.get("SHOW_PHOTOS_FROM_SUBDIRS").and_then(|v| v.as_bool()).unwrap_or(default_config.SHOW_PHOTOS_FROM_SUBDIRS);
+                    let hidden = entry_config.get("HIDDEN").and_then(|v| v.as_bool()).unwrap_or(default_config.HIDDEN);
+                    if !show_photos_from_subdir || hidden {
+                        break;
+                    }
+                    for photo in &photos_in_db {
+                        self.insert_photo(path, photo).await;
                     }
                 }
             }
 
             // If the INDEX_SUBDIRS config is enabled, recursively load photos from subdirectories
             if main_config.INDEX_SUBDIRS {
-                // Find the list of subdirectories in the path, in the filesystem
+                // Find the list of valid subdirectories in the path, in the filesystem
                 let subdirs = list_subdirs(&rel_path, &main_config.PHOTOS_DIR, true, true).await?;
 
                 // Clean obsolete subdirectories (that do not correspond to a subdirectory in the photos folder) from the cache folder
@@ -407,10 +562,10 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &mut PoolConnection<
                         }
                     }
                     if !subdirs_in_cache_to_remove.is_empty() {
-                        println!("Removing {} obsolete directorie(s) in cache : {}",
+                        println!("Removing {} obsolete directory(ies) in cache : {}",
                                 subdirs_in_cache_to_remove.len(),
                                 subdirs_in_cache_to_remove.iter()
-                                    .map(|subdir| format!("\"{}\"", subdir.to_str().unwrap()))
+                                    .map(|subdir| format!("\"{}\"", subdir.to_string_lossy()))
                                     .collect::<Vec<String>>().join(", ")
                         );
                         for subdir in subdirs_in_cache_to_remove {
@@ -422,197 +577,230 @@ pub async fn load(path: &PathBuf, config: &Config, db_conn: &mut PoolConnection<
                     }
                 }
 
-                // Load subdirs recursively
+                // Load subdirectories recursively
                 if !subdirs.is_empty() {
                     for subdir in subdirs {
                         let mut subdir_rel_path = rel_path.clone();
                         subdir_rel_path.push(&subdir);
                         let mut subdir_full_path = full_path.clone();
                         subdir_full_path.push(&subdir);
-                        _load(&subdir_full_path, &subdir_rel_path, db_conn, main_config, &subdir_config, &default_config, &mut added_to_displayed_photos, photos_to_insert, photos_to_remove, paths_found, true).await?;
+                        self.load_rec(&subdir_full_path, &subdir_rel_path, db_conn, main_config, configs_stack, &default_config, photos_to_insert, photos_to_remove, paths_found).await?;
                     }
                 }
             }
 
-            // Reverse the photos sort order if enabled in the config for this subdir
-            let mut reverse_sort_order = this_subdir_config.and_then(|v| v.get("REVERSE_SORT_ORDER").and_then(|v| v.as_bool()));
-            if reverse_sort_order == None && rel_path == &PathBuf::from("") {
-                // If this is the root photos directory and the setting is not defined, use the value from the main config
-                reverse_sort_order = Some(main_config.REVERSE_SORT_ORDER);
-            }
-            if reverse_sort_order.unwrap_or(default_config.REVERSE_SORT_ORDER) {
-                added_to_displayed_photos.reverse();
-            }
-
-            // Add these photos
-            displayed_photos.append(&mut added_to_displayed_photos);
+            // Remove this entry in the stack of configs
+            configs_stack.pop();
 
             Ok(())
         })
     }
 
-    // Make sure the main directories (photos and cache) exist, and if not, try to create them
-    check_config_dir(&PathBuf::from(&config.PHOTOS_DIR)).await
-        .or_else(|e| {
-            if let Error::FileError(error, path) = &e {
-                println!("There is an issue with the PHOTOS_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error.to_string());
+
+    /// Load all available photos in the photos folder, add them to the given gallery, and sync them with the database
+    async fn load(&self, config: &Config, db_conn: &mut PoolConnection<Sqlite>) -> Result<(), Error> {
+        // Make sure the main directories (photos and cache) exist, and if not, try to create them
+        check_config_dir(&PathBuf::from(&config.PHOTOS_DIR)).await
+            .or_else(|e| {
+                if let Error::FileError(error, path) = &e {
+                    println!("There is an issue with the PHOTOS_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error.to_string());
+                }
+                Err(e)
+            })?;
+        check_config_dir(&PathBuf::from(&config.CACHE_DIR)).await
+            .or_else(|error| {
+                if let Error::FileError(error, path) = &error {
+                    eprintln!("There is an issue with the CACHE_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error.to_string());
+                }
+                Err(error)
+            })?;
+        
+        // Keep these paths on hand
+        let full_path = PathBuf::from(&config.PHOTOS_DIR);
+        let rel_path = PathBuf::new();
+
+        // Create a default config to use as a reference for default value of settings
+        let default_config = Config::default();
+
+        // Initialize the stack of configs with the main config
+        let subdir_config = Config::read_as_table().unwrap_or_else(|_| Table::new());
+        let mut configs_stack: Vec<(PathBuf, Table)> = Vec::new();
+        configs_stack.push((PathBuf::from("[main]"), subdir_config));
+
+        // Get all existing UIDs from the database
+        let mut existing_uids = db::get_existing_uids(db_conn).await?;
+
+        // Load the photos recursively, comparing the filesystem and the database.
+        // If some differences are found, they will be returned in these Vec's.
+        let mut photos_to_insert: Vec<Photo> = Vec::new();
+        let mut photos_to_remove: Vec<Photo> = Vec::new();
+        let mut paths_found: Vec<PathBuf> = Vec::new();
+        self.load_rec(
+            &full_path, &rel_path, db_conn,
+            &config, &mut configs_stack, &default_config,
+            &mut Some(&mut photos_to_insert), &mut Some(&mut photos_to_remove), &mut Some(&mut paths_found)
+        ).await?;
+
+        // Get the list of all known subdirs of the current path in the database, check if some have been removed,
+        // and if so add their photos to the 'to_remove' list
+        if config.INDEX_SUBDIRS {
+            let mut deleted_paths:Vec<PathBuf> = Vec::new();
+            let known_paths_in_db = db::get_all_paths(db_conn).await?;
+            for known_path in known_paths_in_db {
+                if !paths_found.contains(&known_path) {
+                    deleted_paths.push(known_path);
+                }
             }
-            Err(e)
-        })?;
-    check_config_dir(&PathBuf::from(&config.CACHE_DIR)).await
-        .or_else(|error| {
-            if let Error::FileError(error, path) = &error {
-                eprintln!("There is an issue with the CACHE_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error.to_string());
-            }
-            Err(error)
-        })?;
-    
-    // Create a default config to use as a reference for default value of settings
-    let default_config = Config::default();
-
-    // Make sure the requested path is valid and if so, convert it to the full path on the file system
-    let full_path = check_path(&path, &config)?;
-
-    // Find and parse all the local config files parent to this path
-    let mut subdir_config = get_subdir_config(&PathBuf::from(&config.PHOTOS_DIR), &path)
-        .unwrap_or(toml::value::Table::new());
-    subdir_config.remove("HIDDEN"); // This setting is not passed on from the parent to the currently open path
-
-    // Get all existing UIDs from the database
-    let mut existing_uids = db::get_existing_uids(db_conn).await?;
-
-    // Load the photos in this path
-    let mut displayed_photos: Vec<Photo> = Vec::new();
-    let mut photos_to_insert: Vec<Photo> = Vec::new();
-    let mut photos_to_remove: Vec<Photo> = Vec::new();
-    let mut paths_found: Vec<PathBuf> = Vec::new();
-    _load(&full_path, &path, db_conn, &config, &subdir_config, &default_config, &mut displayed_photos, &mut Some(&mut photos_to_insert), 
-        &mut Some(&mut photos_to_remove), &mut Some(&mut paths_found), false).await?;
-
-    // Get the list of all known subdirs of the current path in the database, check if some have been removed,
-    // and if so add their photos to the 'to_remove' list
-    if config.INDEX_SUBDIRS {
-        let mut deleted_paths:Vec<PathBuf> = Vec::new();
-        let known_paths_in_db = db::get_paths_starting_with(db_conn, &path).await?;
-        for known_path in known_paths_in_db {
-            if !paths_found.contains(&known_path) {
-                deleted_paths.push(known_path);
-            }
-        }
-        if !deleted_paths.is_empty() {
-            let photos_in_deleted_paths = db::get_photos_in_paths(db_conn, &deleted_paths).await?;
-            for photo in photos_in_deleted_paths {
-                photos_to_remove.push(photo);
-            }
-        }
-    }
-
-    // Calculate the MD5 hashes of the new files
-    if !photos_to_insert.is_empty() {
-        let now = Instant::now();
-        let n = photos_to_insert.len();
-        let mut last_percent: usize = 0;
-        for (i, photo) in photos_to_insert.iter_mut().enumerate() {
-            photo.md5 = calculate_file_md5(&photo.full_path(config)).await?;
-            let percent: usize = (i + 1) * 100 / n;
-            if percent > last_percent {
-                print!("\rCalculating MD5 hashes of {} new files... {}%", n, percent);
-                std::io::stdout().flush().ok();
-                last_percent = percent;
-            }
-        }
-        println!("\nDone in {}ms", now.elapsed().as_millis());
-    }
-
-    // Detect if some of the insert/remove are actually the same file that has been moved or renamed
-    let mut photos_to_move: Vec<(Photo, Photo)> = Vec::new();
-    if !&photos_to_insert.is_empty() && !photos_to_remove.is_empty() {
-        let mut duplicate_hashes: Vec<String> = Vec::new();
-        for new_photo in &photos_to_insert {
-            for old_photo in &photos_to_remove {
-                if old_photo.md5 == new_photo.md5 {
-                    duplicate_hashes.push(old_photo.md5.clone());
-                    photos_to_move.push((old_photo.clone(), new_photo.clone()));
+            if !deleted_paths.is_empty() {
+                let photos_in_deleted_paths = db::get_photos_in_paths(db_conn, &deleted_paths).await?;
+                for photo in photos_in_deleted_paths {
+                    photos_to_remove.push(photo);
                 }
             }
         }
-        photos_to_insert.retain(|photo| !duplicate_hashes.contains(&photo.md5));
-        photos_to_remove.retain(|photo| !duplicate_hashes.contains(&photo.md5));
-    }
 
-    // Apply detected modifications (photos added, moved, or deleted) to the database
-    if !photos_to_insert.is_empty() {
-        // Generate a new UID for these photos
-        for photo in photos_to_insert.iter_mut() {
-            photo.uid = UID::new(&existing_uids);
-            existing_uids.push(photo.uid.clone());
+        // Calculate the MD5 hashes of the new files
+        if !photos_to_insert.is_empty() {
+            let now = Instant::now();
+            let n = photos_to_insert.len();
+            let mut last_percent: usize = 0;
+            for (i, photo) in photos_to_insert.iter_mut().enumerate() {
+                photo.md5 = calculate_file_md5(&photo.full_path(config)).await?;
+                let percent: usize = (i + 1) * 100 / n;
+                if percent > last_percent {
+                    print!("\rCalculating MD5 hashes of {} new files... {}%", n, percent);
+                    std::io::stdout().flush().ok();
+                    last_percent = percent;
+                }
+            }
+            println!("\nDone in {}ms", now.elapsed().as_millis());
         }
 
-        // Log the list of photos to insert
-        println!("Inserting {} photo(s) into the database : {}",
-                photos_to_insert.len(),
-                photos_to_insert.iter()
-                    .map(|photo| format!("\"{}/{}\"", photo.path.to_str().unwrap(), photo.filename))
-                    .collect::<Vec<String>>().join(", ")
-        );
+        // Detect if some of the insert/remove are actually the same file that has been moved or renamed
+        let mut photos_to_move: Vec<(Photo, Photo)> = Vec::new();
+        if !&photos_to_insert.is_empty() && !photos_to_remove.is_empty() {
+            let mut duplicate_hashes: Vec<String> = Vec::new();
+            for new_photo in &photos_to_insert {
+                for old_photo in &photos_to_remove {
+                    if old_photo.md5 == new_photo.md5 {
+                        duplicate_hashes.push(old_photo.md5.clone());
+                        photos_to_move.push((old_photo.clone(), new_photo.clone()));
+                    }
+                }
+            }
+            photos_to_insert.retain(|photo| !duplicate_hashes.contains(&photo.md5));
+            photos_to_remove.retain(|photo| !duplicate_hashes.contains(&photo.md5));
+        }
 
-        // Insert them into the database
-        db::insert_photos(db_conn, &photos_to_insert).await?;
+        // Apply detected modifications (photos added, moved, or deleted) to the database
+        if !photos_to_insert.is_empty() {
+            // For each photo to insert...
+            for photo in photos_to_insert.iter_mut() {
+                // Generate a new UID
+                photo.uid = UID::new(&existing_uids);
+                existing_uids.push(photo.uid.clone());
+
+                // Parse its metadata
+                if let Err(error) = photo.parse_metadata(config).await {
+                    eprintln!("Error : unable to open \"{}/{}\" : {}", photo.path.to_string_lossy(), photo.filename, error);
+                }
+            }
+
+            // Log the list of photos to insert
+            println!("Inserting {} photo(s) into the database : {}",
+                    photos_to_insert.len(),
+                    photos_to_insert.iter()
+                        .map(|photo| format!("\"{}/{}\"", photo.path.to_string_lossy(), photo.filename))
+                        .collect::<Vec<String>>().join(", ")
+            );
+
+            // Insert them into the database
+            db::insert_photos(db_conn, &photos_to_insert).await?;
+        }
+        if !photos_to_remove.is_empty() {
+            // Log the list of photos to remove
+            println!("Removing {} photo(s) from the database : {}",
+                    photos_to_remove.len(),
+                    photos_to_remove.iter()
+                        .map(|photo| format!("\"{}/{}\"", photo.path.to_string_lossy(), photo.filename))
+                        .collect::<Vec<String>>().join(", ")
+            );
+
+            // Remove them from the database
+            db::remove_photos(db_conn, &photos_to_remove).await?;
+        }
+        if !photos_to_move.is_empty() {
+            // Log the list of photos to rename/move
+            println!("Renaming/moving {} photo(s) in the database : {}",
+                    photos_to_move.len(),
+                    photos_to_move.iter()
+                        .map(|pair| format!("\"{}/{}\" -> \"{}/{}\"", pair.0.path.to_string_lossy(), pair.0.filename, pair.1.path.to_string_lossy(), pair.1.filename))
+                        .collect::<Vec<String>>().join(", ")
+            );
+
+            // Update the database
+            db::move_photos(db_conn, &photos_to_move).await?;
+        }
+
+        // If there were some modifications to the photos, reload the database now that it has been updated
+        if !photos_to_insert.is_empty() || !photos_to_remove.is_empty() || !photos_to_move.is_empty() {
+            self.clear().await;
+            self.load_rec(
+                &full_path, &rel_path, db_conn,
+                &config, &mut configs_stack, &default_config,
+                &mut None,&mut None, &mut None
+            ).await?;
+        }
+
+        // Good job.
+        Ok(())
     }
-    if !photos_to_remove.is_empty() {
-        // Log the list of photos to remove
-        println!("Removing {} photo(s) from the database : {}",
-                photos_to_remove.len(),
-                photos_to_remove.iter()
-                    .map(|photo| format!("\"{}/{}\"", photo.path.to_str().unwrap(), photo.filename))
-                    .collect::<Vec<String>>().join(", ")
-        );
 
-        // Remove them from the database
-        db::remove_photos(db_conn, &photos_to_remove).await?;
-    }
-    if !photos_to_move.is_empty() {
-        // Log the list of photos to rename/move
-        println!("Renaming/moving {} photo(s) in the database : {}",
-                photos_to_move.len(),
-                photos_to_move.iter()
-                    .map(|pair| format!("\"{}/{}\" -> \"{}/{}\"", pair.0.path.to_str().unwrap(), pair.0.filename, pair.1.path.to_str().unwrap(), pair.1.filename))
-                    .collect::<Vec<String>>().join(", ")
-        );
-
-        // Update the database
-        db::move_photos(db_conn, &photos_to_move).await?;
-    }
-
-    // If there were some modifications to the photos, reload the database after updating it
-    if !photos_to_insert.is_empty() || !photos_to_remove.is_empty() || !photos_to_move.is_empty() {
-        displayed_photos.clear();
-        _load(&full_path, &path, db_conn, &config, &subdir_config, &default_config, &mut displayed_photos, &mut None,
-            &mut None, &mut None, false).await?;
-    }
-
-    // Add an index to each photo
-    for (index, photo) in displayed_photos.iter_mut().enumerate() {
-        photo.index = index as u32;
-    }
-
-    Ok(displayed_photos)
 }
 
 
+/// RAII read lock on the gallery, obtained with `Gallery::read()`. Every access on the gellery's photos
+/// must pass through an instance of this lock. Concurrent reads are allowed, which means access will
+/// be immediately granted as long as the gallery is not reloading.
+pub struct GalleryReadLock<'a>{
+    guard: RwLockReadGuard<'a, GalleryContent>,
+    path: String,
+    pub start: usize,
+    pub count: usize,
+    pub total: usize,
+}
+
+impl<'a> GalleryReadLock<'a> {
+    fn new(guard: RwLockReadGuard<'a, GalleryContent>, path: String, start: usize, count: usize, total: usize) -> Self {
+        Self { guard, path, start, count, total }
+    }
+
+    /// Get a slice on the photos inside this lock following the parameters given during construction of the lock.
+    /// At most 100 photos are returned.
+    pub fn as_slice(&self) -> &[Arc<Photo>] {
+        // We can safely unwrap() here because the presence of the key has already been checked in Gallery::read()
+        // and since we have had a lock since then the hashmap cannot have been modified. Same for the slice
+        // parameters of the Vec.
+        &self.guard.get(&self.path).unwrap().as_slice()[self.start..self.start+self.count]
+    }
+}
+
+
+
 /// Fairing callback used to load/sync the photos with the database at startup
-pub async fn init_load(rocket: Rocket<rocket::Build>) -> fairing::Result {
+pub async fn init(rocket: Rocket<rocket::Build>) -> fairing::Result {
     // Make sure the database has been initialized (fairings have been attached in the correct order)
     match db::DB::fetch(&rocket) {
         Some(db) => match db.0.acquire().await {
             Ok(mut db_conn) => {
+                let config = rocket.state::<Config>().expect("Error : unable to obtain the config");
+                let gallery = rocket.state::<Gallery>().expect("Error : unable to obtain the gallery");
+
                 println!("Loading photos...");
                 let now = Instant::now();
-                let config = rocket.state::<Config>()
-                    .expect("Error : unable to obtain the config");
-                match load(&PathBuf::from(""), &config, &mut db_conn).await {
-                    Ok(photos) => {
-                        println!("Loaded {} photos successfully in {}ms", photos.len(), now.elapsed().as_millis());
+                match gallery.load(&config, &mut db_conn).await {
+                    Ok(_) => {
+                        println!("Loaded {} photos successfully in {}ms", gallery.len().await, now.elapsed().as_millis());
                         Ok(rocket)
                     }
                     Err(error) => {
@@ -620,6 +808,7 @@ pub async fn init_load(rocket: Rocket<rocket::Build>) -> fairing::Result {
                         Err(rocket)
                     }
                 }}
+
             Err(error) => {
                 eprintln!("Error : unable to acquire a connection to the database : {}", error);
                 Err(rocket)
@@ -629,53 +818,6 @@ pub async fn init_load(rocket: Rocket<rocket::Build>) -> fairing::Result {
             eprintln!("Error : unable to obtain a handle to the database");
             Err(rocket)
         }
-    }
-}
-
-
-/// Load a single photo from the database
-pub async fn get_from_uid(uid: &UID, config: &Config, db_conn: &mut PoolConnection<Sqlite>) -> Result<Option<Photo>, Error> {
-    // Get the photo associated to this uid
-    let photo = db::get_photo(db_conn, uid).await;
-
-    match photo {
-        Ok(Some(mut photo)) => {
-            // This photo exists, try to parse its metadata if not done already
-            match photo.parse_metadata(config, db_conn).await {
-                Ok(_) => Ok(Some(photo)),
-                Err(error) => {
-                    eprintln!("Error : unable to parse metadata of photo #{} : {}", &uid, &error);
-                    Err(error)
-                }
-            }
-        }
-        Ok(None) => Ok(None),
-        Err(error) => {
-            eprintln!("Error : unable to load photo #{} : {}", &uid, &error);
-            Err(error)
-        }
-    }
-}
-
-
-/// Load a single photo from the database and return the path to its resized version,
-/// after generating it if necessary
-pub async fn get_resized_from_uid(uid: &UID, resized_type: ResizedType, config: &Config, db_conn: &mut PoolConnection<Sqlite>) -> Result<Option<(Photo, PathBuf)>, Error> {
-    match get_from_uid(uid, config, db_conn).await? {
-        Some(photo) => {
-            // Path of the resized version of this photo in the cache folder
-            let mut resized_file_path = PathBuf::from(&config.CACHE_DIR);
-            resized_file_path.push(&photo.path);
-            resized_file_path.push(format!("{}_{}.jpg", resized_type.prefix(), &photo.uid));
-
-            // Generate this file if it doesn't exist
-            if !resized_file_path.is_file() {
-                photo.create_resized(&resized_file_path, resized_type, config).await?;
-            }
-
-            Ok(Some((photo, resized_file_path)))
-        },
-        None => Ok(None),
     }
 }
 
@@ -712,48 +854,6 @@ async fn check_config_dir(path: &PathBuf) -> Result<(), Error> {
         // Return any other error directly
         Err(error) => Err(Error::FileError(error, path.clone())),
     }
-}
-
-
-/// Check that the given path exists and is a valid photos folder
-pub fn check_path(path: &PathBuf, config: &Config) -> Result<PathBuf, Error> {
-    // The given path must be relative because it will appended to the PHOTOS_DIR path
-    if path.is_absolute() {
-        return Err(Error::FileError(io::Error::from(io::ErrorKind::NotFound), path.clone()));
-    }
-
-    // Forbid opening subdirectories if INDEX_SUBDIRS is disabled
-    if !config.INDEX_SUBDIRS && path.to_str() != Some("") {
-        return Err(Error::FileError(io::Error::from(io::ErrorKind::NotFound), path.clone()));
-    }
-
-    // Append the given relative path to the PHOTOS_DIR path, and make sure the resulting full_path exists
-    let mut full_path = PathBuf::from(&config.PHOTOS_DIR);
-    full_path.push(path);
-    if !full_path.is_dir() {
-        return Err(Error::FileError(io::Error::from(io::ErrorKind::NotFound), path.clone()));
-    }
-
-    // Return the full path to the caller
-    Ok(full_path)
-}
-
-
-/// Find and parse all the subdir config files parent to the given path and return the compiled config
-fn get_subdir_config(photos_path: &PathBuf, path: &PathBuf) -> Result<toml::value::Table, Error> {
-
-    // Read the main config as the base config to start with
-    let mut subdir_config_table = Config::read_as_table()?;
-
-    // From the photos directory, explore every subdir in the given path
-    let mut current_path = PathBuf::from(photos_path);
-    Config::update_with_subdir(&current_path, &mut subdir_config_table);
-    for component in path.components() {
-        current_path.push(&component);
-        Config::update_with_subdir(&current_path, &mut subdir_config_table);
-    }
-
-    Ok(subdir_config_table)
 }
 
 

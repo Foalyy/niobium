@@ -280,10 +280,10 @@ impl Config {
     //     value
     // }
 
-    /// Update in place the given TOML Table by replacing its keys with the ones found in `other_tabl²e`
+    /// Update in place the given TOML Table by replacing its keys with the ones found in `other_table`
     pub fn update_with<'a>(table: &'a mut Table, other_table: &Table) -> &'a Table {
-        for entry in other_table.iter() {
-            table.insert(entry.0.clone(), entry.1.clone());
+        for (key, value) in other_table.iter() {
+            table.insert(key.clone(), value.clone());
         }
         table
     }
