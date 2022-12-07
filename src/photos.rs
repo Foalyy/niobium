@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::uid::UID;
 use crate::{Error, db};
+use std::cmp::min;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::{self, Write};
@@ -11,6 +12,7 @@ use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use md5::{Md5, Digest};
 use rocket::tokio::sync::{RwLock, RwLockReadGuard};
+use rocket::tokio::task::JoinSet;
 use rocket::{Rocket, fairing, tokio};
 use rocket::serde::Serialize;
 use rocket::tokio::fs::create_dir_all;
@@ -660,19 +662,46 @@ impl Gallery {
             }
         }
 
-        // Calculate the MD5 hashes of the new files
+        // Calculate the MD5 hashes of the new files in parallel background tasks
         if !photos_to_insert.is_empty() {
             let now = Instant::now();
             let n = photos_to_insert.len();
             let mut last_percent: usize = 0;
-            for (i, photo) in photos_to_insert.iter_mut().enumerate() {
-                photo.md5 = calculate_file_md5(&photo.full_path).await?;
-                let percent: usize = (i + 1) * 100 / n;
-                if percent > last_percent {
-                    print!("\rCalculating MD5 hashes of {} new files... {}%", n, percent);
-                    std::io::stdout().flush().ok();
-                    last_percent = percent;
+            let mut tasks = JoinSet::new();
+            let mut results: Vec<(usize, String)> = Vec::new();
+            let mut offset = 0;
+            while results.len() < n {
+                // Create up to LOADING_WORKERS background tasks
+                let batch_size = min(n - offset, config.LOADING_WORKERS);
+                for idx in offset..offset+batch_size {
+                    let photo = &photos_to_insert[idx];
+                    let full_path = photo.full_path.clone();
+                    tasks.spawn(async move {
+                        let full_path = full_path;
+                        (idx, calculate_file_md5(&full_path).await)
+                    });
                 }
+                offset += batch_size;
+
+                // Wait for these tasks to complete and add their results to the list
+                while let Some(result) = tasks.join_next().await {
+                    match result {
+                        Ok((i, Ok(md5))) => {
+                            results.push((i, md5));
+                            let percent: usize = (i + 1) * 100 / n;
+                            if percent > last_percent {
+                                print!("\rCalculating MD5 hashes of {} new files... {}%", n, percent);
+                                std::io::stdout().flush().ok();
+                                last_percent = percent;
+                            }
+                        }
+                        Ok((i, Err(error))) => eprintln!("Error : unable to compute MD5 for \"{}\" : {}", photos_to_insert.get(i).unwrap().filename, error),
+                        Err(error) => eprintln!("Error : unable to join background task while computing MD5 : {}", error),
+                    }
+                }
+            }
+            for (i, md5) in results {
+                photos_to_insert.get_mut(i).unwrap().md5 = md5;
             }
             println!("\nDone in {}ms", now.elapsed().as_millis());
         }
