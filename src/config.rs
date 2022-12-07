@@ -1,4 +1,5 @@
 use crate::Error;
+use crate::photos::ImageFormat;
 use std::{fs, path::PathBuf};
 use std::path::Path;
 use rocket::serde::{Serialize, Deserialize};
@@ -146,6 +147,11 @@ pub struct Config {
     /// Default : 85
     #[serde(default="config_default_large_view_quality")]
     pub LARGE_VIEW_QUALITY: usize,
+
+    /// Image format used for resized photos in cache : JPEG or WEBP
+    /// Default : WEBP
+    #[serde(default="config_default_resized_image_format")]
+    pub RESIZED_IMAGE_FORMAT: ImageFormat,
     
     /// If enable, the app will try to read EXIF metadata of photos and save them in the
     /// database.
@@ -390,6 +396,10 @@ fn config_default_large_view_max_size() -> usize {
 
 fn config_default_large_view_quality() -> usize {
     85 // %
+}
+
+fn config_default_resized_image_format() -> ImageFormat {
+    ImageFormat::WEBP
 }
 
 fn config_default_dowload_prefix() -> String {

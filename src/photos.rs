@@ -22,6 +22,7 @@ use rocket::futures::StreamExt;
 use rocket_db_pools::Database;
 use rocket_db_pools::sqlx::Sqlite;
 use rocket_db_pools::sqlx::pool::PoolConnection;
+use serde::Deserialize;
 use tokio_stream::wrappers::ReadDirStream;
 use toml::value::Table;
 
@@ -162,17 +163,23 @@ impl Photo {
     }
 
     /// Create a resized version of this photo in the cache folder
-    async fn create_resized(&self, resized_type: ResizedType, config: &Config) -> Result<PathBuf, Error> {
+    async fn create_resized(&self, resized_type: ResizedType, image_format: ImageFormat, config: &Config) -> Result<PathBuf, Error> {
         let max_size = resized_type.max_size(config);
         let quality = resized_type.quality(config);
-        self.create_resized_from_params(resized_type, config.CACHE_DIR.clone(), max_size, quality).await
+        self.create_resized_from_params(resized_type, image_format, config.CACHE_DIR.clone(), max_size, quality).await
     }
 
-    async fn create_resized_from_params(&self, resized_type: ResizedType, cache_dir: String, max_size: usize, quality: usize) -> Result<PathBuf, Error> {
+    async fn create_resized_from_params(&self, resized_type: ResizedType, image_format: ImageFormat, cache_dir: String, max_size: usize, quality: usize) -> Result<PathBuf, Error> {
+        // Extention according to the configure image format
+        let file_extension = match image_format {
+            ImageFormat::JPEG => "jpg",
+            ImageFormat::WEBP => "webp",
+        };
+
         // Path of the resized version of this photo in the cache folder
         let mut resized_file_path = PathBuf::from(&cache_dir);
         resized_file_path.push(&self.path);
-        resized_file_path.push(format!("{}_{}.jpg", resized_type.prefix(), &self.uid));
+        resized_file_path.push(format!("{}_{}.{}", resized_type.prefix(), &self.uid, file_extension));
 
         // Check if the file already exists
         if resized_file_path.exists() {
@@ -209,24 +216,45 @@ impl Photo {
         
         // Resize this image
         let img_resized = img.resize(max_size as u32, max_size as u32, FilterType::CatmullRom);
+
+        // Check quality setting
+        let quality = quality.try_into().unwrap_or_else(|_| {
+            eprintln!("Warning : invalid 'quality' value for image encoder (must be between 10 and 100), falling back to 80");
+            80
+        });
     
-        // Create the JPEG encoder with the configured quality
+        // Create an encoder and write the image to the output file.
         // Note that this uses the standard fs API, as opposed to tokio's async API, because the encoder is not compatible
-        // the async equivalent of Writer
+        // with the async equivalent of Writer.
         let file = std::fs::File::create(&resized_file_path)
             .map_err(|e| Error::FileError(e, resized_file_path.clone()))?;
-        let writer = std::io::BufWriter::new(file);
-        let mut encoder = JpegEncoder::new_with_quality(
-            writer,
-            quality.try_into().unwrap_or_else(|_| {
-                eprintln!("Warning : invalid 'quality' value for JPEG encoder (must be between 10 and 100), falling back to 80");
-                80
-            })
-        );
+        let mut writer = std::io::BufWriter::new(file);
+        match image_format {
+            ImageFormat::JPEG => {
+                // Create the JPEG encoder with the configured quality
+                let mut encoder = JpegEncoder::new_with_quality(writer, quality);
         
-        // Encode the image
-        encoder.encode_image(&img_resized)
-            .map_err(|e| Error::ImageError(e, file_path.clone()))?;
+                // Encode the image
+                encoder.encode_image(&img_resized)
+                    .map_err(|e| Error::ImageError(e, file_path.clone()))?;
+            }
+            ImageFormat::WEBP => {
+                // Create the WEPB encoder
+                let encoder = webp::Encoder::from_image(&img_resized).or_else(|error| {
+                    eprintln!("Error : failed to create a WEBP encoder for \"{}\" : {}", resized_file_path.display(), error);
+                    Err(Error::WebpEncoderError(error.to_string(), resized_file_path.clone()))
+                })?;
+
+                // Encode the image to a memory buffer
+                let data = encoder.encode(quality as f32);
+
+                // Write the buffer to the output file
+                writer.write(&*data).or_else(|error| {
+                    eprintln!("Error : unable to write to \"{}\" : {}", resized_file_path.display(), error);
+                    Err(Error::FileError(error, resized_file_path.clone()))
+                })?;
+            }
+        }
         
         Ok(resized_file_path)
     }
@@ -379,7 +407,7 @@ impl Gallery {
         match self.get_from_uid(uid).await {
             Some(photo) => {
                 // Generate this file if it doesn't exist
-                let resized_file_path = photo.create_resized(resized_type, config).await?;
+                let resized_file_path = photo.create_resized(resized_type, config.RESIZED_IMAGE_FORMAT, config).await?;
     
                 Ok(Some((photo, resized_file_path)))
             }
@@ -751,6 +779,7 @@ impl Gallery {
                 while let Some(mut photo) = photos_to_insert.pop() {
                     // Background task which takes ownership of the photo object
                     let cache_dir = config.CACHE_DIR.clone();
+                    let image_format = config.RESIZED_IMAGE_FORMAT;
                     tasks.push(tokio::spawn( async move {
                         // Parse the metadata
                         photo.parse_metadata(true).await
@@ -761,8 +790,8 @@ impl Gallery {
                         
                         // Generate thumbnails
                         if pre_generate_thumbnails {
-                            photo.create_resized_from_params(ResizedType::THUMBNAIL, cache_dir.clone(), thumbnail_max_size, thumbnail_quality).await.ok();
-                            photo.create_resized_from_params(ResizedType::LARGE, cache_dir.clone(), large_size_max_size, large_size_quality).await.ok();
+                            photo.create_resized_from_params(ResizedType::THUMBNAIL, image_format, cache_dir.clone(), thumbnail_max_size, thumbnail_quality).await.ok();
+                            photo.create_resized_from_params(ResizedType::LARGE, image_format, cache_dir.clone(), large_size_max_size, large_size_quality).await.ok();
                         }
 
                         // Return ownership of the photo to the main thread
@@ -1016,4 +1045,12 @@ impl ResizedType {
             ResizedType::LARGE => config.LARGE_VIEW_QUALITY,
         }
     }
+}
+
+/// Available image formats for cache files
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, Default)]
+pub enum ImageFormat {
+    JPEG,
+    #[default]
+    WEBP,
 }

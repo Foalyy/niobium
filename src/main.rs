@@ -294,7 +294,9 @@ pub enum Error {
     TomlParserError(toml::de::Error),
     DatabaseError(sqlx::Error),
     ImageError(image::ImageError, PathBuf),
+    WebpEncoderError(String, PathBuf),
     EXIFParserError(exif::Error, PathBuf),
+    OtherError(String),
 }
 
 impl Display for Error {
@@ -307,7 +309,9 @@ impl Display for Error {
             Error::TomlParserError(error) => write!(f, "TOML parser error : {}", error),
             Error::DatabaseError(error) => write!(f, "database error : {}", error),
             Error::ImageError(error, path) => write!(f, "image error for \"{}\" : {}", path.display(), error),
+            Error::WebpEncoderError(error, path) => write!(f, "WEPB encoder error for \"{}\" : {}", path.display(), error),
             Error::EXIFParserError(error, path) => write!(f, "EXIF parser error for \"{}\" : {}", path.display(), error),
+            Error::OtherError(error) => write!(f, "other error : {}", error),
         }
     }
 }
