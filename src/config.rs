@@ -74,9 +74,10 @@ pub struct Config {
     pub DATABASE_PATH: String,
     
     /// Fields(s) to use to sort the photos being displayed. This can be a single field or a
-    /// comma-separated list of fields for multi-ordering. Available fields : `filename`,
-    /// `title`, `date_taken`, `sort_order`
-    /// Default : "filename"
+    /// comma-separated list of fields for multi-ordering. Available fields : `id`,
+    /// `filename`, `title`, `date_taken`, `sort_order`.
+    /// Default : "id" (the order in which they have been added to the database, which
+    /// is a natural sort on the filename)
     /// This setting is overridable.
     #[serde(default="config_default_sort_order")]
     pub SORT_ORDER: String,
@@ -356,7 +357,7 @@ fn config_default_database_path() -> String {
 }
 
 fn config_default_sort_order() -> String {
-    "filename".to_string()
+    "id".to_string()
 }
 
 fn config_default_row_height() -> usize {

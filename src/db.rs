@@ -123,12 +123,18 @@ pub async fn get_photos_in_paths(db_conn: &mut PoolConnection<Sqlite>, paths: &V
 pub async fn get_photos_in_path(db_conn: &mut PoolConnection<Sqlite>, path: &PathBuf, sort_columns: &Vec<String>, config: &Config) -> Result<Vec<Photo>, Error> {
     let mut query_builder = QueryBuilder::new("SELECT * FROM photo WHERE path=");
     query_builder.push_bind(path.to_string_lossy());
-    query_builder.push(" ORDER BY ");
-    let mut separated = query_builder.separated(", ");
-    for col in sort_columns {
-        separated.push(col);
+
+    let sort_columns = sort_columns.iter().map(|c| c.trim()).filter(|&c| c != "").collect::<Vec<&str>>();
+    if !sort_columns.is_empty() {
+        query_builder.push(" ORDER BY ");
+        let mut separated = query_builder.separated(", ");
+        for col in sort_columns {
+            separated.push(col);
+        }
+        separated.push_unseparated(";");
+    } else {
+        query_builder.push(";");
     }
-    separated.push_unseparated(";");
 
     let query = query_builder.build();
     get_photos_from_query(db_conn, query, config).await

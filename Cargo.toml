@@ -15,6 +15,7 @@ image = "0.24.5"
 kamadak-exif = "0.5.5"
 md-5 = "0.10.5"
 rand = "0.8.4"
+natord = "1.0.9"
 
 [dependencies.rocket_dyn_templates]
 version = "0.1.0-rc.2"

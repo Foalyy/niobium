@@ -432,7 +432,7 @@ impl Gallery {
                         }
                     }
                 }
-                filenames_in_fs.sort();
+                filenames_in_fs.sort_by(|a, b| natord::compare_ignore_case(a, b));
             }
 
             // Get the list of photos saved in the database for this path exactly
@@ -704,6 +704,10 @@ impl Gallery {
                 existing_uids.push(photo.uid.clone());
             }
 
+            // Since we will handle the list from last to first (because of pop()) we need to reverse
+            // the array first to keep the original order
+            photos_to_insert.reverse();
+
             // Parse the photos' metadata and, if set in the config, generate their thumbnails
             let pre_generate_thumbnails = config.PRE_GENERATE_THUMBNAILS;
             let thumbnail_max_size = ResizedType::THUMBNAIL.max_size(config);
@@ -744,7 +748,7 @@ impl Gallery {
                 }
 
                 // Wait for the background tasks to finish
-                for task in tasks.into_iter().rev() {
+                for task in tasks.into_iter() {
                     if let Ok(photo) = task.await {
                         photos_to_insert_in_db.push(photo);
                     }
@@ -940,7 +944,7 @@ pub async fn list_subdirs(path: &PathBuf, folder: &str, include_hidden: bool, er
         }
     }
 
-    subdirs.sort();
+    subdirs.sort_by(|a, b| natord::compare_ignore_case(a, b));
     Ok(subdirs)
 }
 
