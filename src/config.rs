@@ -203,9 +203,8 @@ impl Config {
 
     /// Return a Config struct with default values
     pub fn default() -> Config {
-        Self {
-            ..Default::default()
-        }
+        let empty_value = toml::value::Value::Table(Table::new());
+        empty_value.try_into::<Self>().unwrap()
     }
 
     /// Deserialize a TOML Table into a Config struct
