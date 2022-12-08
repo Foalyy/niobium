@@ -114,8 +114,8 @@ async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid
             }))
         }
 
-        // The path is either not found or invalid for the current config, return the 404 template
-        None => page_404(&config),
+        // The path is either not found or invalid for the current config, return an empty 404 response
+        None => PageResult::NotFoundEmpty(()),
     }
 }
 
@@ -254,6 +254,8 @@ pub enum PageResult {
     PhotoDownload(DownloadedNamedFile),
     #[response(status = 404)]
     NotFound(Template),
+    #[response(status = 404)]
+    NotFoundEmpty(()),
     #[response(status = 500)]
     Err(()),
 }

@@ -1,5 +1,5 @@
 {% for photo in photos %}
-    <div class="grid-item" data-index="{{ photo.0 }}" data-count="{{ n_photos }}" style="{% if photo.1.width and photo.1.height %}max-width: calc({{ (config.MAX_CROP * photo.1.width / photo.1.height)|round(precision=1) }} * var(--row-height)); aspect-ratio: {{ photo.1.width }}/{{ photo.1.height }};{% endif %} {% if photo.1.metadata_parsed %}background-color: #{{ photo.1.color }};{% endif %}" data-uid="{{ photo.1.uid }}" data-load-url="{{ photo.2 | safe }}" data-loaded="false">
+    <div class="grid-item" data-index="{{ photo.0 }}" data-count="{{ n_photos }}" style="{% if photo.1.width and photo.1.height %}max-width: calc({{ (config.MAX_CROP * photo.1.width / photo.1.height)|round(precision=1) }} * var(--row-height)); aspect-ratio: {{ photo.1.width }}/{{ photo.1.height }};{% endif %} {% if photo.1.metadata_parsed %}background-color: #{{ photo.1.color }};{% endif %}" data-uid="{{ photo.1.uid.uid }}" data-load-url="{{ photo.2 | safe }}" data-loaded="false">
         <div class="loading loading-fullsize">
             <div class="spinner"><i class="fas fa-spinner"></i></div>
         </div>

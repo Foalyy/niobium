@@ -279,14 +279,14 @@ function loadGrid(before=false, preselectedUID=undefined, around=false, password
     let args = '';
     if (preselectedUID) {
         if (!around) {
-            args = '?uid=' + preselectedUID;
+            args = '&uid=' + preselectedUID;
         } else {
             let start = $('[data-uid="' + preselectedUID + '"').data('index') - loadGridBatchSize/2;
             if (start < 0) {
                 start = 0;
             }
             let count = loadGridBatchSize;
-            args = "?start=" + start + "&count=" + count;
+            args = "&start=" + start + "&count=" + count;
         }
     } else {
         let start = 0;
