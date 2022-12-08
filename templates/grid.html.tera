@@ -25,7 +25,7 @@
             >
         {% endif -%}
         <div class="loading loading-fullsize">
-            <div class="spinner"><i class="fas fa-spinner"></i></div>
+            <div class="spinner"><img src="static/img/spinner.svg"></div>
         </div>
         <div class="loading-error hidden">
             <i class="fas fa-triangle-exclamation"></i>

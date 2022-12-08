@@ -58,11 +58,16 @@ body {
 }
 
 .spinner {
-    font-size: 20px;
-    color: white;
     opacity: 0.1;
-    animation: rotation 1s infinite;
+    width: 1.5em;
+    height: 1.5em;
+    animation: rotation 1.5s infinite;
     animation-timing-function: linear;
+}
+
+.spinner img {
+    width: 100%;
+    height: 100%;
 }
 
 .loading-error {
