@@ -129,12 +129,12 @@ pub struct Config {
     pub SLIDESHOW_DELAY: usize,
     
     /// Max size of thumbnails on any side, in pixels.
-    /// Default : 400
+    /// Default : 600
     #[serde(default="config_default_thumbnail_max_size")]
     pub THUMBNAIL_MAX_SIZE: usize,
     
     /// Quality used to reencode thumbnails images, in percent.
-    /// Default : 70
+    /// Default : 75
     #[serde(default="config_default_thumbnail_quality")]
     pub THUMBNAIL_QUALITY: usize,
     
@@ -383,11 +383,11 @@ fn config_default_slideshow_delay() -> usize {
 }
 
 fn config_default_thumbnail_max_size() -> usize {
-    400 // px, on any side
+    600 // px, on any side
 }
 
 fn config_default_thumbnail_quality() -> usize {
-    70 // %
+    75 // %
 }
 
 fn config_default_large_view_max_size() -> usize {
