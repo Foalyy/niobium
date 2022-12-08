@@ -333,6 +333,30 @@ function disconnectGridLoaderObservers() {
     gridEndIntersectionObserver.disconnect();
 }
 
+function setupImage(image, callback) {
+    $(image).on('load', function() {
+        $(image).parent().children('.loading').remove();
+        $(image).removeClass('transparent');
+        $(image).on('click', function(event) {
+            let openGridItem = $(this).parents('.grid-item');
+            selectPhoto(openGridItem);
+            openLoupe(openGridItem);
+        });
+        if (callback != undefined) {
+            callback(gridItem);
+        }
+    });
+    $(image).on('mouseenter', function(event) {
+        if (mouseEnterEnabled) {
+            selectPhoto($(event.target).parents('.grid-item'));
+        }
+    });
+    $(image).on('mouseleave', function(event) {
+        $(event.target).parents('.grid-item').removeClass('selected');
+    });
+    $(image).attr('src', $(image).data('src-thumbnail'));
+}
+
 function loadPhoto(gridItem, callback) {
     if (!$(gridItem).data('loaded')) {
         let request = new XMLHttpRequest();
@@ -343,28 +367,7 @@ function loadPhoto(gridItem, callback) {
                         return;
                     }
                     $(request.responseText.replace(/\n/g, '').trim()).prependTo($(gridItem));
-                    let image = $(gridItem).children('.photo');
-                    $(image).on('load', function() {
-                        $(image).parent().children('.loading').remove();
-                        $(image).removeClass('transparent');
-                        $(image).on('click', function(event) {
-                            let openGridItem = $(this).parents('.grid-item');
-                            selectPhoto(openGridItem);
-                            openLoupe(openGridItem);
-                        });
-                        if (callback != undefined) {
-                            callback(gridItem);
-                        }
-                    });
-                    $(image).on('mouseenter', function(event) {
-                        if (mouseEnterEnabled) {
-                            selectPhoto($(event.target).parents('.grid-item'));
-                        }
-                    });
-                    $(image).on('mouseleave', function(event) {
-                        $(event.target).parents('.grid-item').removeClass('selected');
-                    });
-                    $(image).attr('src', $(image).data('src-thumbnail'));
+                    setupImage($(gridItem).children('.photo'))
                     $(gridItem).data('loaded', true);
                 } else {
                     $(gridItem).children('.loading').remove();
@@ -374,6 +377,8 @@ function loadPhoto(gridItem, callback) {
         };
         request.open('GET', $(gridItem).data('load-url'), true);
         request.send();
+    } else if ($(gridItem).children('.photo').length > 0 && $(gridItem).children('.photo').attr('src') == "") {
+        setupImage($(gridItem).children('.photo'))
     } else {
         if (callback != undefined) {
             callback(gridItem);

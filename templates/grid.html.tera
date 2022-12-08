@@ -1,5 +1,29 @@
 {% for photo in photos %}
-    <div class="grid-item" data-index="{{ photo.0 }}" data-count="{{ n_photos }}" style="{% if photo.1.width and photo.1.height %}max-width: calc({{ (config.MAX_CROP * photo.1.width / photo.1.height)|round(precision=1) }} * var(--row-height)); aspect-ratio: {{ photo.1.width }}/{{ photo.1.height }};{% endif %} {% if photo.1.metadata_parsed %}background-color: #{{ photo.1.color }};{% endif %}" data-uid="{{ photo.1.uid.uid }}" data-load-url="{{ photo.2 | safe }}" data-loaded="false">
+    <div class="grid-item" data-index="{{ photo.0 }}" data-count="{{ n_photos }}" style="{% if photo.1.width and photo.1.height %}max-width: calc({{ (config.MAX_CROP * photo.1.width / photo.1.height)|round(precision=1) }} * var(--row-height)); aspect-ratio: {{ photo.1.width }}/{{ photo.1.height }};{% endif %} {% if photo.1.metadata_parsed %}background-color: #{{ photo.1.color }};{% endif %}" data-uid="{{ photo.1.uid.uid }}" data-load-url="{{ photo.2 | safe }}" data-loaded="{{ photo.1.metadata_parsed }}">
+        {%- if photo.1.metadata_parsed %}
+            <img
+                class="photo transparent"
+                src=""
+                data-src-thumbnail="{{ photo.3 | safe }}"
+                data-src-large="{{ photo.4 | safe }}"
+                data-src-full="{{ photo.5 | safe }}"
+                data-src-download="{{ photo.6 | safe }}"
+                data-width="{{ photo.1.width }}"
+                data-height="{{ photo.1.height }}"
+                data-color="#{{ photo.1.color }}"
+                {%- if config.SHOW_METADATA %}
+                    data-title="{{ photo.1.title }}"
+                    data-date="{{ photo.1.date_taken }}"
+                    data-place="{{ photo.1.place }}"
+                    data-camera="{{ photo.1.camera_model }}"
+                    data-lens="{{ photo.1.lens_model }}"
+                    data-focal-length="{{ photo.1.focal_length }}"
+                    data-aperture="{{ photo.1.aperture }}"
+                    data-exposure-time="{{ photo.1.exposure_time }}"
+                    data-sensitivity="{{ photo.1.sensitivity }}"
+                {% endif -%}
+            >
+        {% endif -%}
         <div class="loading loading-fullsize">
             <div class="spinner"><i class="fas fa-spinner"></i></div>
         </div>

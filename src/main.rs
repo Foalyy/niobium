@@ -9,7 +9,7 @@ mod uid;
 use config::Config;
 use db::DB;
 use nav_data::NavData;
-use photos::{Gallery, Photo};
+use photos::Gallery;
 use rocket::fairing::AdHoc;
 use rocket::response::Redirect;
 use uid::UID;
@@ -104,8 +104,16 @@ async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid
         Some(gallery_lock) => {
             // Convert the sublist of photos to a Vec with individual index and URLs
             let photos = gallery_lock.as_slice().iter().enumerate()
-                .map(|(index, photo_pointer)| (gallery_lock.start + index, photo_pointer.deref(), uri!(get_grid_item(&photo_pointer.uid)).to_string()))
-                .collect::<Vec<(usize, &Photo, String)>>();
+                .map(|(index, photo_pointer)| (
+                    gallery_lock.start + index,
+                    photo_pointer.deref(),
+                    uri!(get_grid_item(&photo_pointer.uid)).to_string(),
+                    uri!(get_thumbnail(&photo_pointer.uid)),
+                    uri!(get_large(&photo_pointer.uid)),
+                    uri!(get_photo(&photo_pointer.uid)),
+                    uri!(download_photo(&photo_pointer.uid)),
+                ))
+                .collect::<Vec<_>>();
 
             PageResult::Page(Template::render("grid", context! {
                 config: &config.inner(),
