@@ -34,6 +34,8 @@ async fn rocket() -> _ {
 
     // Send some of the settings to Rocket
     let figment = rocket::Config::figment()
+        .merge(("ident", "Niobium"))
+        .merge(("secret_key", config::get_secret_key_or_exit()))
         .merge(("address", config.ADDRESS.parse::<IpAddr>().map_err(|e| {
             eprintln!("Error : invalid value for ADDRESS in {} : {}", config::FILENAME, e);
             std::process::exit(-1);

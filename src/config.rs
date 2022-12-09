@@ -1,7 +1,11 @@
 use crate::Error;
 use crate::photos::ImageFormat;
+use std::fs::File;
+use std::io;
+use std::io::Write;
 use std::{fs, path::PathBuf};
 use std::path::Path;
+use rand::RngCore;
 use rocket::serde::{Serialize, Deserialize};
 use toml::value::Table;
 
@@ -408,4 +412,40 @@ fn config_default_dowload_prefix() -> String {
 
 fn config_default_loading_workers() -> usize {
     16
+}
+
+/// Try to open the .secret file in the app's directory and return
+/// the secret key inside. If this file doesn't exist, try to generate
+/// a new one. In case of an error, print the error on stderr and exit.
+pub fn get_secret_key_or_exit() -> String {
+    let path = PathBuf::from(".secret");
+    match fs::read_to_string(&path) {
+        Ok(secret) => secret.trim().to_string(),
+        
+        // The secret file doesn't exist, try to generate one
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            print!("Secret file not found, generating a new one... ");
+            let mut rand_buffer = [0; 32];
+            rand::thread_rng().fill_bytes(&mut rand_buffer);
+            let secret = base64::encode(rand_buffer);
+            let mut file = File::create(&path)
+                .unwrap_or_else(|error| {
+                    eprintln!("\nError : unable to create the .secret file : {}", error);
+                    std::process::exit(-1);
+                });
+            writeln!(&mut file, "{}", secret)
+                .unwrap_or_else(|error| {
+                    eprintln!("\nError : unable to write to the .secret file : {}", error);
+                    std::process::exit(-1);
+                });
+            println!(" done");
+            secret
+        }
+
+        // The secret file can't be read for some other reason
+        Err(error) => {
+            eprintln!("Error : unable to read the .secret file : {}", error);
+            std::process::exit(-1);
+        }
+    }
 }

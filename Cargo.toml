@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rocket = "0.5.0-rc.2"
+rocket = { version = "0.5.0-rc.2", features = ["secrets"] }
 tokio-stream = { version = "0.1.11", features = ["fs"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.5.9"
@@ -16,6 +16,7 @@ webp = "0.2.2"
 kamadak-exif = "0.5.5"
 md-5 = "0.10.5"
 rand = "0.8.4"
+base64 = "0.13.1"
 natord = "1.0.9"
 
 [dependencies.rocket_dyn_templates]
