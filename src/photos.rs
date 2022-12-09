@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::password::OptionalPassword;
 use crate::uid::UID;
 use crate::{Error, db};
 use std::cmp::min;
@@ -11,6 +12,7 @@ use std::sync::Arc;
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use md5::{Md5, Digest};
+use rocket::http::{CookieJar, Cookie};
 use rocket::tokio::sync::{RwLock, RwLockReadGuard};
 use rocket::tokio::task::JoinSet;
 use rocket::{Rocket, fairing, tokio};
@@ -268,6 +270,7 @@ pub type GalleryContent = HashMap<String, Vec<Arc<Photo>>>;
 pub struct Gallery {
     gallery: RwLock<GalleryContent>,
     photos: RwLock<HashMap<UID, Arc<Photo>>>,
+    passwords: RwLock<HashMap<String, String>>,
 }
 
 impl Gallery {
@@ -277,6 +280,7 @@ impl Gallery {
         Self {
             gallery: RwLock::new(HashMap::new()),
             photos: RwLock::new(HashMap::new()),
+            passwords: RwLock::new(HashMap::new()),
         }
     }
 
@@ -291,8 +295,10 @@ impl Gallery {
     pub async fn clear(&self) {
         let mut gallery_lock = self.gallery.write().await;
         let mut photos_lock = self.photos.write().await;
+        let mut passwords_lock = self.passwords.write().await;
         gallery_lock.clear();
         photos_lock.clear();
+        passwords_lock.clear();
     }
 
 
@@ -401,6 +407,45 @@ impl Gallery {
     }
 
 
+    /// Check if the current session state stored in private cookies allows access to the given path
+    /// Returns Some with the message to display to the user if a password is required, or None
+    /// either if no password is required or if access is granted
+    pub async fn check_password(&self, path: &PathBuf, cookies: &CookieJar<'_>, request_password: &OptionalPassword) -> Option<String> {
+        let path_str = path.to_string_lossy().to_string();
+        match self.passwords.read().await.get(&path_str) {
+            Some(gallery_password) => {
+                // A password is required, check if one has been provided
+                let mut save_in_cookie = false;
+                let user_provided_password: Option<String> = match request_password.as_string() {
+                    // A password was provided through the request guard (the Authorization header)
+                    Some(password) => {
+                        save_in_cookie = true;
+                        Some(password.clone())
+                    }
+
+                    // No password was provided in a header, try to find one in the session cookie
+                    None => cookies.get_private(&path_str).map(|v| v.value().to_string()),
+                };
+                match user_provided_password {
+                    Some(password) => {
+                        if &password == gallery_password {
+                            if save_in_cookie {
+                                // This password was provided with an Authorization header, save it in the session cookie
+                                cookies.add_private(Cookie::new(path_str, password))
+                            }
+                            None // Access granted
+                        } else {
+                            Some("Invalid password".to_string())
+                        }
+                    }
+                    None => Some("A password is required to access this gallery".to_string()),
+                }
+            }
+            None => None, // No password required
+        }
+    }
+
+
     /// Return a copy of a single photo from the cache based on its UID, with the path to its resized version,
     /// after generating it if necessary
     pub async fn get_resized_from_uid(&self, uid: &UID, resized_type: ResizedType, config: &Config) -> Result<Option<(Photo, PathBuf)>, Error> {
@@ -440,10 +485,25 @@ impl Gallery {
             // Try to find a config file in this directory, append it to a copy of the current one (so it won't propagate to
             // sibling directories), and put it on the stack
             let mut cfg = configs_stack.last().unwrap().1.clone();
-            cfg.remove("HIDDEN"); // This setting doesn't propagate from the parent
+            cfg.remove("HIDDEN"); // These settings don't propagate from the parent
+            cfg.remove("PASSWORD");
             Config::update_with_subdir(&full_path, &mut cfg);
             configs_stack.push((rel_path.clone(), cfg));
             let subdir_config = &configs_stack.last().unwrap().1;
+
+            // If this directory is password-protected, add it to the list
+            let password = match subdir_config.get("PASSWORD") {
+                Some(value) if value.is_str() => value.as_str().unwrap().to_string(),
+                Some(_) => {
+                    eprintln!("Warning : invalid value for PASSWORD in {}", rel_path.display());
+                    // Generate a random password to prevent access
+                    base64::encode(rand::random::<[u8; 32]>())
+                }
+                None => "".to_string(),
+            };
+            if password.len() > 0 {
+                self.passwords.write().await.insert(rel_path.to_string_lossy().to_string(), password);
+            }
 
             // List the files inside this path in the photos directory
             let mut filenames_in_fs: Vec<String> = Vec::new();
@@ -863,6 +923,10 @@ impl Gallery {
         Ok(())
     }
 
+    pub async fn get_passwords(&self) -> RwLockReadGuard<HashMap<String, String>> {
+        self.passwords.read().await
+    }
+
 }
 
 
@@ -993,7 +1057,10 @@ pub async fn list_subdirs(path: &PathBuf, folder: &str, include_hidden: bool, er
                     subdir_path.push(&dir_name);
                     let mut subdir_config_table: Table = Table::new();
                     Config::update_with_subdir(&subdir_path, &mut subdir_config_table);
-                    let subdir_config = Config::from_table(subdir_config_table).unwrap_or_default();
+                    let subdir_config = Config::from_table(subdir_config_table).unwrap_or_else(|error| {
+                        eprintln!("Warning : unable to deserialize local config file in \"{}\" : {}", subdir_path.display(), error);
+                        Config::default()
+                    });
                     if subdir_config.INDEX && (include_hidden || !subdir_config.HIDDEN) {
                         subdirs.push(dir_name);
                     }

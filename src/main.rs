@@ -5,16 +5,18 @@ mod db;
 mod nav_data;
 mod photos;
 mod uid;
+mod password;
 
 use config::Config;
 use db::DB;
 use nav_data::NavData;
 use photos::Gallery;
+use uid::UID;
+use password::OptionalPassword;
 use rocket::fairing::AdHoc;
 use rocket::response::Redirect;
-use uid::UID;
 use rocket::fs::NamedFile;
-use rocket::http::Header;
+use rocket::http::{Header, CookieJar};
 use rocket::{fs::FileServer, State};
 use rocket_dyn_templates::{Template, context};
 use rocket_db_pools::{sqlx, Database, Connection};
@@ -75,7 +77,7 @@ async fn rocket() -> _ {
 async fn get_gallery(path: PathBuf, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
     if gallery.path_exists(&path).await {
         // This path exists in the gallery, calculate the content of the nav panel
-        match NavData::from_path(&path, &config).await {
+        match NavData::from_path(&path, &gallery, &config).await {
             // Render the template
             Ok(nav_data) => PageResult::Page(Template::render("main", context! {
                 config: config.inner(),
@@ -98,49 +100,74 @@ async fn get_gallery(path: PathBuf, gallery: &State<Gallery>, config: &State<Con
 
 /// Route handler called by javascript to return the grid items for the given path and parameters
 #[get("/<path..>?grid&<start>&<count>&<uid>", rank=10)]
-async fn get_grid(path: PathBuf, start: Option<usize>, count: Option<usize>, uid: Option<UID>, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
-    // Try to obtain a read pointer to some photos in this path in the gallery based on the request parameters
-    match gallery.read(&path, start, count, uid).await {
+async fn get_grid(
+        path: PathBuf,
+        start: Option<usize>, count: Option<usize>, uid: Option<UID>,
+        gallery: &State<Gallery>,
+        config: &State<Config>,
+        cookies: &CookieJar<'_>,
+        password: OptionalPassword
+) -> PageResult {
+    // Check if a password is required to access this path
+    match gallery.check_password(&path, cookies, &password).await {
+        // A password is required and is either missing or invalid
+        Some(message) => PageResult::PasswordRequired(message),
 
-        // We have a valid (possibly empty) list of photos, render it as a template
-        Some(gallery_lock) => {
-            // Convert the sublist of photos to a Vec with individual index and URLs
-            let photos = gallery_lock.as_slice().iter().enumerate()
-                .map(|(index, photo_pointer)| (
-                    gallery_lock.start + index,
-                    photo_pointer.deref(),
-                    uri!(get_grid_item(&photo_pointer.uid)).to_string(),
-                    uri!(get_thumbnail(&photo_pointer.uid)),
-                    uri!(get_large(&photo_pointer.uid)),
-                    uri!(get_photo(&photo_pointer.uid)),
-                    uri!(download_photo(&photo_pointer.uid)),
-                ))
-                .collect::<Vec<_>>();
+        // Either no password is required or a valid one has been provided
+        None => {
+            // Try to obtain a read pointer to some photos in this path in the gallery based on the request parameters
+            match gallery.read(&path, start, count, uid).await {
 
-            PageResult::Page(Template::render("grid", context! {
-                config: &config.inner(),
-                photos: &photos,
-                n_photos: gallery_lock.total,
-            }))
+                // We have a valid (possibly empty) list of photos, render it as a template
+                Some(gallery_lock) => {
+                    // Convert the sublist of photos to a Vec with individual index and URLs
+                    let photos = gallery_lock.as_slice().iter().enumerate()
+                        .map(|(index, photo_pointer)| (
+                            gallery_lock.start + index,
+                            photo_pointer.deref(),
+                            uri!(get_grid_item(&photo_pointer.uid)).to_string(),
+                            uri!(get_thumbnail(&photo_pointer.uid)),
+                            uri!(get_large(&photo_pointer.uid)),
+                            uri!(get_photo(&photo_pointer.uid)),
+                            uri!(download_photo(&photo_pointer.uid)),
+                        ))
+                        .collect::<Vec<_>>();
+
+                    PageResult::Page(Template::render("grid", context! {
+                        config: &config.inner(),
+                        photos: &photos,
+                        n_photos: gallery_lock.total,
+                    }))
+                }
+
+                // The path is either not found or invalid for the current config, return an empty 404 response
+                None => PageResult::NotFoundEmpty(()),
+            }
         }
-
-        // The path is either not found or invalid for the current config, return an empty 404 response
-        None => PageResult::NotFoundEmpty(()),
     }
 }
 
 
 /// Route handler called by javascript to return the nav menu for the given path
 #[get("/<path..>?nav", rank=11)]
-async fn get_nav(path: PathBuf, config: &State<Config>) -> PageResult {
-    match NavData::from_path(&path, &config).await {
-        Ok(nav_data) => PageResult::Page(Template::render("nav", context! {
-            config: &config.inner(),
-            nav: nav_data,
-        })),
-        Err(error) => {
-            eprintln!("Error : unable to generate nav data for \"{}\" : {}", path.display(), error);
-            PageResult::Err(())
+async fn get_nav(path: PathBuf, gallery: &State<Gallery>, config: &State<Config>, cookies: &CookieJar<'_>, password: OptionalPassword) -> PageResult {
+    // Check if a password is required to access this path
+    match gallery.check_password(&path, cookies, &password).await {
+        // A password is required and is either missing or invalid
+        Some(message) => PageResult::PasswordRequired(message),
+
+        // Either no password is required or a valid one has been provided
+        None => {
+            match NavData::from_path(&path, &gallery, &config).await {
+                Ok(nav_data) => PageResult::Page(Template::render("nav", context! {
+                    config: &config.inner(),
+                    nav: nav_data,
+                })),
+                Err(error) => {
+                    eprintln!("Error : unable to generate nav data for \"{}\" : {}", path.display(), error);
+                    PageResult::Err(())
+                }
+            }
         }
     }
 }
@@ -266,6 +293,8 @@ pub enum PageResult {
     NotFound(Template),
     #[response(status = 404)]
     NotFoundEmpty(()),
+    #[response(status = 401)]
+    PasswordRequired(String),
     #[response(status = 500)]
     Err(()),
 }

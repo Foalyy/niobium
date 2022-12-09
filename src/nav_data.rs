@@ -1,7 +1,7 @@
 use std::path::{PathBuf, Component};
 use rocket::serde::Serialize;
 
-use crate::{photos, config::Config, Error};
+use crate::{photos::{self, Gallery}, config::Config, Error};
 
 /// Data used to fill the template for the navigation panel
 #[derive(Serialize, Debug)]
@@ -49,7 +49,7 @@ impl Split for PathBuf {
 impl NavData {
 
     /// Generate a full NavaData struct based on the given path and config
-    pub async fn from_path(path: &PathBuf, config: &Config) -> Result<Self, Error> {
+    pub async fn from_path(path: &PathBuf, gallery: &Gallery, config: &Config) -> Result<Self, Error> {
         let mut path_current = path.clone();
         let mut path_parent = path_current.parent().map(|p| p.to_path_buf());
         let path_navigate_up = path_parent.clone().map(|p| p.to_path_buf());
@@ -108,14 +108,13 @@ impl NavData {
 
         // Check which subdirs are locked
         let mut locked_subdirs: Vec<String> = Vec::new();
+        let passwords = gallery.get_passwords().await;
         for subdir in &subdirs {
-            let mut subdir_config_table = toml::value::Table::new();
-            let mut subdir_path = PathBuf::from(&config.PHOTOS_DIR);
-            subdir_path.push(&path_current);
-            subdir_path.push(&subdir);
-            Config::update_with_subdir(&subdir_path, &mut subdir_config_table);
-            if subdir_config_table.contains_key("PASSWORD") {
-                locked_subdirs.push(subdir.clone());
+            let mut subdir_path = path_current.clone();
+            subdir_path.push(subdir);
+            let subdir_path_str = subdir_path.to_string_lossy().to_string();
+            if passwords.contains_key(&subdir_path_str) {
+                locked_subdirs.push(subdir_path_str);
             }
         }
 
