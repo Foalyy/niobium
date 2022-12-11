@@ -13,10 +13,10 @@
 {% block body %}
     <div class="container">
         <div class="grid">
-            <div class="loading grid-content-loading grid-content-loading-start hidden"><div class="spinner"><img src="static/img/spinner.svg"></div></div>
+            <div class="loading grid-content-loading grid-content-loading-start hidden"><div class="spinner"><img src="/static/img/spinner.svg"></div></div>
             <div class="grid-content">
             </div>
-            <div class="loading grid-content-loading grid-content-loading-end hidden"><div class="spinner"><img src="static/img/spinner.svg"></div></div>
+            <div class="loading grid-content-loading grid-content-loading-end hidden"><div class="spinner"><img src="/static/img/spinner.svg"></div></div>
             <div class="grid-actions grid-actions-topright hidden">
                 {% if config.INSTAGRAM %}
                     <div class="grid-button grid-action-instagram" title="Instagram"><a href="https://www.instagram.com/{{ config.INSTAGRAM }}/" target="_blank"><i class="fa-brands fa-instagram fa-fw"></i></a></div>
@@ -29,7 +29,7 @@
                 <div>This photo folder is empty</div>
             </div>
             <div class="loading loading-fullsize grid-loading">
-                <div class="spinner"><img src="static/img/spinner.svg"></div>
+                <div class="spinner"><img src="/static/img/spinner.svg"></div>
             </div>
             <div class="loading-error grid-loading-error hidden">
                 <i class="fas fa-triangle-exclamation"></i>
@@ -47,7 +47,7 @@
                         <div class="navigation-panel-content"></div>
                         <div class="navigation-panel-close"><i class="fa-solid fa-xmark fa-fw"></i></div>
                         <div class="loading loading-fullsize nav-loading">
-                            <div class="spinner"><img src="static/img/spinner.svg"></div>
+                            <div class="spinner"><img src="/static/img/spinner.svg"></div>
                         </div>
                         <div class="loading-error nav-loading-error hidden">
                             <i class="fas fa-triangle-exclamation"></i>
@@ -86,7 +86,7 @@
             </div>
             <div class="loupe-photo-index"><span></span></div>
             <div class="loading loading-fullsize loupe-loading hidden">
-                <div class="spinner"><img src="static/img/spinner.svg"></div>
+                <div class="spinner"><img src="/static/img/spinner.svg"></div>
             </div>
         </div>
         <div class="password-prompt-container hidden">
@@ -98,7 +98,7 @@
                     <input type="password" name="password" id="password" class="password-prompt-input" />
                     <div class="password-prompt-validate"><i class="fa-solid fa-angle-right"></i></div>
                     <div class="loading loading-fullsize hidden">
-                        <div class="spinner"><img src="static/img/spinner.svg"></div>
+                        <div class="spinner"><img src="/static/img/spinner.svg"></div>
                     </div>
                 </div>
             </div>
