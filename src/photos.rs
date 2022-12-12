@@ -1,11 +1,12 @@
 use crate::config::Config;
-use crate::password::OptionalPassword;
+use crate::password::{Passwords, OptionalPassword, PasswordError, self};
 use crate::uid::UID;
 use crate::{Error, db};
 use std::cmp::min;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::{self, Write};
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -263,13 +264,45 @@ impl Photo {
 }
 
 
-pub type GalleryContent = HashMap<String, Vec<Arc<Photo>>>;
+/// A photo stored in cache with extra metadata
+#[derive(Debug)]
+pub struct CachedPhoto {
+    photo: Arc<Photo>,
+    passwords: Vec<(String, String)>,
+}
+
+impl CachedPhoto {
+    fn new(photo: Photo, passwords: Vec<(String, String)>) -> Self {
+        Self {
+            photo: Arc::new(photo),
+            passwords: passwords,
+        }
+    }
+
+    fn clone_from(photo: &CachedPhoto, passwords: Vec<(String, String)>) -> Self {
+        Self {
+            photo: Arc::clone(&photo.photo),
+            passwords: passwords,
+        }
+    }
+}
+
+impl Deref for CachedPhoto {
+    type Target = Photo;
+
+    fn deref(&self) -> &Self::Target {
+        &self.photo.as_ref()
+    }
+}
+
+
+pub type GalleryContent = HashMap<String, Vec<CachedPhoto>>;
 
 /// Thread-safe struct that holds a list of photos and allows them to be accessed efficiently once loaded
 /// This is supposed to be managed by Rocket
 pub struct Gallery {
     gallery: RwLock<GalleryContent>,
-    photos: RwLock<HashMap<UID, Arc<Photo>>>,
+    photos: RwLock<HashMap<UID, CachedPhoto>>,
     passwords: RwLock<HashMap<String, String>>,
 }
 
@@ -338,31 +371,29 @@ impl Gallery {
 
     /// Insert the given photo in the gallery at the given path. If this photo is already registered in the gallery for a given path,
     /// it will not get duplicated, instead the smart pointer that will be inserted will point to the same Photo internally
-    async fn insert_photo(&self, path: &PathBuf, photo: &Photo) {
+    async fn insert_photo(&self, path: &PathBuf, photo: &Photo, passwords: Vec<(String, String)>) {
         // If this photo has already been inserted somewhere in the gallery, it also has an Arc pointer stored in the `photos`
         // hashmap that we can retreive efficiently; otherwise, create a new Arc and insert it into the hashmap
         let mut photos_lock = self.photos.write().await;
-        let arc = photos_lock.entry(photo.uid.clone()).or_insert_with(|| Arc::new(photo.clone()));
+        let cached_photo = photos_lock.entry(photo.uid.clone()).or_insert_with(|| CachedPhoto::new(photo.clone(), passwords.clone()));
 
         // Create a clone of this Arc pointer to share the underlying Photo object
-        let photo_pointer = Arc::clone(arc);
+        let photo_pointer = CachedPhoto::clone_from(cached_photo, passwords);
 
-        // If this path has already been inserted in the gallery, retreive its Vec of Arc pointers to Photo objects; otherwise,
+        // If this path has already been inserted in the gallery, retrieve its Vec of Arc pointers to Photo objects; otherwise,
         // create an empty Vec
         let mut gallery_lock = self.gallery.write().await;
         let vec = gallery_lock.entry(path.to_string_lossy().into_owned()).or_insert_with(|| Vec::new());
 
         // Add this Arc pointer to the list of photos for this path in the gallery if it hasn't already been inserted
-        if !vec.iter().any(|p| p.uid == photo.uid) {
+        if !vec.iter().any(|cp| cp.photo.uid == photo.uid) {
             vec.push(photo_pointer);
         }
     }
 
 
-    /// Acquire a read lock on the gallery if the path exists, or return None otherwise. Use `as_slice()` on the return type to read the photos.
-    /// If the metadata of some of the requested photos hasn't been parsed, this will acquire a temporary write lock on the gallery
-    /// to perform this operation, which may take some time.
-    pub async fn read<'a>(&'a self, path: &'a PathBuf, start: Option<usize>, count: Option<usize>, uid: Option<UID>) -> Option<GalleryReadLock<'a>> {
+    /// Acquire a read lock on the gallery if the path exists, or return None otherwise
+    pub async fn read<'a>(&'a self, path: &'a PathBuf, start: Option<usize>, count: Option<usize>, uid: Option<UID>, provided_passwords: Passwords) -> Option<GalleryReadLock<'a>> {
         let path = path.to_string_lossy().to_string();
         
         let gallery_read_lock = self.gallery.read().await;
@@ -372,11 +403,11 @@ impl Gallery {
     
             // Compute pagination
             let mut start = start.unwrap_or(0);
-            let mut count = count.unwrap_or(n_photos);
+            let mut max_count = count.unwrap_or(n_photos);
             if let Some(uid) = uid { // Only return a single UID if requested
-                if let Some(idx) = photos.iter().position(|p| p.uid == uid) {
+                if let Some(idx) = photos.iter().position(|cp| cp.photo.uid == uid) {
                     start = idx;
-                    count = 1;
+                    max_count = 1;
                 }
                 // If the requested UID hasn't been found, ignore this constraint and return a list based on `start` and `count` if provided,
                 // or default values otherwise.
@@ -384,15 +415,15 @@ impl Gallery {
             if start >= n_photos {
                 start = 0;
             }
-            if start + count > n_photos {
-                count = n_photos - start;
+            if start + max_count > n_photos {
+                max_count = n_photos - start;
             }
-            if count > 100 { // Limit the maximum number of results to 100
-                count = 100;
+            if max_count > 100 { // Limit the maximum number of results to 100
+                max_count = 100;
             }
 
-            // Return a read lock on the gallery that can be used to access the photos
-            Some(GalleryReadLock::new(gallery_read_lock, path, start, count, n_photos))
+            // Return a read lock on the gallery that provides an iterator to access the photos
+            Some(GalleryReadLock::new(gallery_read_lock, path, start, max_count, n_photos, provided_passwords))
 
         } else {
             // This path is not found in the gallery
@@ -403,45 +434,81 @@ impl Gallery {
 
     /// Return a copy of a single photo from the cache, based on its UID
     pub async fn get_from_uid(&self, uid: &UID) -> Option<Photo> {
-        Some(Photo::clone(self.photos.read().await.get(uid)?))
+        Some(Photo::clone(&self.photos.read().await.get(uid)?.photo))
     }
 
 
-    /// Check if the current session state stored in private cookies allows access to the given path
-    /// Returns Some with the message to display to the user if a password is required, or None
-    /// either if no password is required or if access is granted
-    pub async fn check_password(&self, path: &PathBuf, cookies: &CookieJar<'_>, request_password: &OptionalPassword) -> Option<String> {
-        let path_str = path.to_string_lossy().to_string();
-        match self.passwords.read().await.get(&path_str) {
-            Some(gallery_password) => {
-                // A password is required, check if one has been provided
-                let mut save_in_cookie = false;
-                let user_provided_password: Option<String> = match request_password.as_string() {
-                    // A password was provided through the request guard (the Authorization header)
-                    Some(password) => {
-                        save_in_cookie = true;
-                        Some(password.clone())
-                    }
+    /// Check if the current session state stored in private cookies as well as any password provided
+    /// with the current request grants access to the given path. If a new valid password has been
+    /// provided in the current request, add it to the session cookie.
+    /// Returns Ok with the list of all passwords in the user's session either if no password is required
+    /// or if access is granted, or Err with the kind of error if the password is invalid.
+    pub async fn check_password(&self, path: &PathBuf, cookies: &CookieJar<'_>, request_password: &OptionalPassword) -> Result<Passwords, PasswordError> {
+        // Get a lock on the gallery's password list
+        let gallery_passwords = self.passwords.read().await;
 
-                    // No password was provided in a header, try to find one in the session cookie
-                    None => cookies.get_private(&path_str).map(|v| v.value().to_string()),
-                };
-                match user_provided_password {
-                    Some(password) => {
-                        if &password == gallery_password {
-                            if save_in_cookie {
-                                // This password was provided with an Authorization header, save it in the session cookie
-                                cookies.add_private(Cookie::new(path_str, password))
-                            }
-                            None // Access granted
-                        } else {
-                            Some("Invalid password".to_string())
-                        }
-                    }
-                    None => Some("A password is required to access this gallery".to_string()),
+        // Compute the list of user-provided passwords
+        let mut user_passwords = Passwords::new();
+        for (gallery_path, required_password) in gallery_passwords.deref() {
+            if let Some(provided_password) = cookies.get_private(&password::cookie_name(&gallery_path)).map(|c| c.value().to_string()) {
+                if &provided_password == required_password {
+                    user_passwords.insert(gallery_path.clone(), provided_password);
                 }
             }
-            None => None, // No password required
+        }
+
+        // Compute the list of required passwords to access this path
+        let mut required_passwords = Passwords::new();
+        let mut path_current = path.clone();
+        let empty_path = PathBuf::new();
+        while path_current != empty_path {
+            let path_current_str = path_current.to_string_lossy().to_string();
+            if let Some(password) = gallery_passwords.get(&path_current_str) {
+                required_passwords.insert(path_current_str, password.clone());
+            }
+            path_current.pop();
+        }
+        let mut paths_requiring_passwords = required_passwords.keys().collect::<Vec<&String>>();
+        paths_requiring_passwords.sort();
+
+        if required_passwords.is_empty() {
+            // No password required
+            return Ok(user_passwords);
+        } else {
+            // At least one password is required, check all of them in order
+            for required_password_path in paths_requiring_passwords {
+                let required_password = required_passwords.get(required_password_path).unwrap();
+                // Check if a matching password was provided through the request guard (the Authorization header)
+                if let Some(user_provided_password) = request_password.as_string() {
+                    // Check if the password matches
+                    if user_provided_password == required_password {
+                        // It does : save it in the session cookies
+                        cookies.add_private(Cookie::new(password::cookie_name(required_password_path), user_provided_password.clone()));
+                        user_passwords.insert(required_password_path.clone(), user_provided_password.clone());
+
+                        // Jump to the next required password in the list, if any
+                        continue;
+                    }
+                }
+
+                // Check if there is a valid password in the session cookies
+                if let Some(user_password) = user_passwords.get(required_password_path) {
+                    // Check if the password matches
+                    if user_password == required_password {
+                        // It matches : jump to the next required password in the list, if any
+                        continue;
+                    } else {
+                        // It doesn't match : return "invalid password"
+                        return Err(PasswordError::Invalid(required_password_path.clone()));
+                    }
+                } else {
+                    // No password found : return "password required"
+                    return Err(PasswordError::Required(required_password_path.clone()));
+                }
+            }
+
+            // All passwords have been provided
+            return Ok(user_passwords);
         }
     }
 
@@ -614,34 +681,45 @@ impl Gallery {
                 }
             }
 
-            // Add these photos to the gallery
-            // TODO : handle PASSWORD setting
+            // Add these photos recursively to this path and its parent paths in the gallery as long as SHOW_PHOTOS_FROM_SUBDIRS is set and HIDDEN isn't
             if !photos_in_db.is_empty() {
-                // Add them to this path
-                for photo in &photos_in_db {
-                    self.insert_photo(rel_path, photo).await;
-                }
-
-                // Add them recursively to the parent paths as long as SHOW_PHOTOS_FROM_SUBDIRS is set and HIDDEN isn't
-                for (path, entry_config) in configs_stack[1..configs_stack.len()-1].iter().rev() {
+                let mut is_parent = false; // False for the first iteration, then set to true for the parent paths
+                let mut passwords: Vec<(String, String)> = Vec::new();
+                for (path, entry_config) in configs_stack[1..configs_stack.len()].iter().rev() {
+                    // If we are in a parent directory of the current path, stop adding photos when a SHOW_PHOTOS_FROM_SUBDIRS=false
+                    // or a HIDDEN=true are encountered
                     let show_photos_from_subdir = entry_config.get("SHOW_PHOTOS_FROM_SUBDIRS").and_then(|v| v.as_bool()).unwrap_or(default_config.SHOW_PHOTOS_FROM_SUBDIRS);
                     let hidden = entry_config.get("HIDDEN").and_then(|v| v.as_bool()).unwrap_or(default_config.HIDDEN);
-                    if !show_photos_from_subdir || hidden {
+                    if is_parent && (!show_photos_from_subdir || hidden) {
                         break;
                     }
-                    for photo in &photos_in_db {
-                        self.insert_photo(path, photo).await;
+
+                    // Remember that a password is required for this photo to be displayed
+                    if let Some(password) = entry_config.get("PASSWORD").and_then(|v| v.as_str()) {
+                        passwords.push((path.to_string_lossy().to_string(), password.to_string()));
                     }
+
+                    // Add all the photos at this level
+                    for photo in &photos_in_db {
+                        self.insert_photo(path, photo, passwords.clone()).await;
+                    }
+
+                    // If the current path is marked as hidden, don't add the photos to the parents paths
+                    if hidden {
+                        break;
+                    }
+
+                    is_parent = true;
                 }
             }
 
             // If the INDEX_SUBDIRS config is enabled, recursively load photos from subdirectories
             if main_config.INDEX_SUBDIRS {
                 // Find the list of valid subdirectories in the path, in the filesystem
-                let subdirs = list_subdirs(&rel_path, &main_config.PHOTOS_DIR, true, true).await?;
+                let subdirs = list_subdirs(&rel_path, &main_config.PHOTOS_DIR, true, None, true).await?;
 
                 // Clean obsolete subdirectories (that do not correspond to a subdirectory in the photos folder) from the cache folder
-                let subdirs_in_cache = list_subdirs(&rel_path, &main_config.CACHE_DIR, true, false).await?;
+                let subdirs_in_cache = list_subdirs(&rel_path, &main_config.CACHE_DIR, true, None, false).await?;
                 if !subdirs_in_cache.is_empty() {
                     let mut subdirs_in_cache_to_remove: Vec<PathBuf> = Vec::new();
                     for subdir in subdirs_in_cache {
@@ -937,22 +1015,64 @@ pub struct GalleryReadLock<'a>{
     guard: RwLockReadGuard<'a, GalleryContent>,
     path: String,
     pub start: usize,
-    pub count: usize,
+    pub max_count: usize,
     pub total: usize,
+    provided_passwords: Passwords,
 }
 
 impl<'a> GalleryReadLock<'a> {
-    fn new(guard: RwLockReadGuard<'a, GalleryContent>, path: String, start: usize, count: usize, total: usize) -> Self {
-        Self { guard, path, start, count, total }
+    fn new(guard: RwLockReadGuard<'a, GalleryContent>, path: String, start: usize, max_count: usize, total: usize, provided_passwords: Passwords) -> Self {
+        Self { guard, path, start, max_count, total, provided_passwords }
     }
 
-    /// Get a slice on the photos inside this lock following the parameters given during construction of the lock.
-    /// At most 100 photos are returned.
-    pub fn as_slice(&self) -> &[Arc<Photo>] {
-        // We can safely unwrap() here because the presence of the key has already been checked in Gallery::read()
-        // and since we have had a lock since then the hashmap cannot have been modified. Same for the slice
-        // parameters of the Vec.
-        &self.guard.get(&self.path).unwrap().as_slice()[self.start..self.start+self.count]
+    pub fn iter(&'a self) -> GalleryReadIterator<'a> {
+        GalleryReadIterator::new(self)
+    }
+}
+
+pub struct GalleryReadIterator<'a> {
+    lock: &'a GalleryReadLock<'a>,
+    counter: usize,
+}
+
+impl<'a> GalleryReadIterator<'a> {
+    fn new(lock: &'a GalleryReadLock<'a>) -> Self {
+        Self { lock, counter: 0 }
+    }
+}
+
+impl<'a> Iterator for GalleryReadIterator<'a> {
+    type Item = &'a Photo;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Find the next photo available in this path in the gallery
+        let photos = self.lock.guard.get(&self.lock.path).unwrap();
+        'find_a_photo: while self.counter < self.lock.max_count {
+            // Get the next photo
+            if let Some(photo) = photos.get(self.lock.start + self.counter) {
+                self.counter += 1;
+
+                // Check if this photo requires some passwords
+                for (required_password_path, required_password) in &photo.passwords {
+                    if let Some(provided_password) = self.lock.provided_passwords.get(required_password_path) {
+                        if required_password != provided_password {
+                            // This required password is invalid in the user's session
+                            continue 'find_a_photo;
+                        }
+                    } else {
+                        // This required password is not found in the user's session
+                        continue 'find_a_photo;
+                    }
+                }
+                return Some(&photo.photo);
+
+            } else {
+                // No more photos in this gallery
+                return None;
+            }
+        }
+        // We have returned enough photos
+        None
     }
 }
 
@@ -1061,7 +1181,7 @@ pub async fn list_subdirs(path: &PathBuf, folder: &str, include_hidden: bool, er
                         eprintln!("Warning : unable to deserialize local config file in \"{}\" : {}", subdir_path.display(), error);
                         Config::default()
                     });
-                    if subdir_config.INDEX && (include_hidden || !subdir_config.HIDDEN) {
+                    if always_include == Some(&dir_name) || (subdir_config.INDEX && (include_hidden || !subdir_config.HIDDEN)) {
                         subdirs.push(dir_name);
                     }
                 }

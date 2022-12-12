@@ -1,6 +1,8 @@
-use std::fmt::Display;
+use std::{fmt::Display, collections::HashMap};
 
 use rocket::{request::{FromRequest, self}, http::Status};
+
+pub type Passwords = HashMap<String, String>;
 
 /// Custom type used as a request guard which represents a password optionally
 /// sent by the client with an Authorization header. This request guard never
@@ -10,6 +12,10 @@ use rocket::{request::{FromRequest, self}, http::Status};
 pub struct OptionalPassword(Option<String>);
 
 impl OptionalPassword {
+    pub fn none() -> Self {
+        Self(None)
+    }
+
     /// Return a new OptionalPassword from the given base64-encoded string
     fn from_base64(encoded: String) -> Result<Self, PasswordDecodeError> {
         let decoded_buffer = base64::decode(encoded)?;
@@ -70,4 +76,24 @@ impl Display for PasswordDecodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Invalid header")
     }
+}
+
+
+/// Kinds of error when checking if a password
+pub enum PasswordError {
+    Required(String),
+    Invalid(String),
+}
+
+impl PasswordError {
+    pub fn message(&self) -> String {
+        match self {
+            PasswordError::Required(path) => format!("A password is required to access \"{}\"", path),
+            PasswordError::Invalid(path) => format!("Invalid password for \"{}\"", path),
+        }
+    }
+}
+
+pub fn cookie_name(path: &str) -> String {
+    format!("niobium_pw_{}", path)
 }

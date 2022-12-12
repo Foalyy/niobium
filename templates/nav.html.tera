@@ -24,7 +24,7 @@
         {% endif %}
         <li class="navigation-panel-subdir-current"><a class="nav-link" href="{{ nav.url_path_current | safe }}" data-load-url="{{ nav.url_path_current | safe }}?grid" data-nav-url="{{ nav.url_path_current | safe }}?nav"><i class="fa-solid fa-folder-open fa-fw"></i> {{ nav.current }}</a></li>
         {% for subdir in nav.subdirs_with_urls %}
-            <li class="navigation-panel-subdir{% if subdir.0 == nav.open_subdir %} navigation-panel-subdir-open selected{% endif %}"><a class="nav-link" href="{{ subdir.1 | safe }}" data-load-url="{{ subdir.1 | safe }}?grid" data-nav-url="{{ subdir.1 | safe }}?nav"><i class="fa-solid fa-folder fa-fw"></i><i class="fa-solid fa-folder-open fa-fw"></i> {% if subdir.0 in nav.locked_subdirs %}<i class="fa-solid fa-lock fa-fw"></i> {% endif %}{{ subdir.0 }}</a></li>
+            <li class="navigation-panel-subdir{% if subdir.0 == nav.open_subdir %} navigation-panel-subdir-open selected{% endif %}"><a class="nav-link" href="{{ subdir.1 | safe }}" data-load-url="{{ subdir.1 | safe }}?grid" data-nav-url="{{ subdir.1 | safe }}?nav"><i class="fa-solid fa-folder fa-fw"></i><i class="fa-solid fa-folder-open fa-fw"></i> {% if subdir.0 in nav.locked_subdirs %}<i class="fa-solid fa-lock fa-fw"></i> {% elif subdir.0 in nav.unlocked_subdirs %}<i class="fa-solid fa-lock-open fa-fw"></i>{% endif %}{{ subdir.0 }}</a></li>
         {% else %}
             <li class="navigation-panel-no-subdirs">No subdirectories</li>
         {% endfor %}

@@ -1,10 +1,10 @@
 use std::path::{PathBuf, Component};
 use rocket::serde::Serialize;
 
-use crate::{photos::{self, Gallery}, config::Config, Error};
+use crate::{photos::{self, Gallery}, config::Config, Error, password::Passwords};
 
 /// Data used to fill the template for the navigation panel
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Default)]
 pub struct NavData {
     is_root: bool,
     url_path_root: String,
@@ -23,6 +23,7 @@ pub struct NavData {
     subdirs_with_urls: Vec<(String, String)>,
     open_subdir: Option<String>,
     locked_subdirs: Vec<String>,
+    unlocked_subdirs: Vec<String>,
 }
 
 
@@ -48,8 +49,16 @@ impl Split for PathBuf {
 
 impl NavData {
 
+    /// Generate a minimal NavData struct for the main template
+    pub fn new() -> Self {
+        Self {
+            is_root: true,
+            ..Default::default()
+        }
+    }
+
     /// Generate a full NavaData struct based on the given path and config
-    pub async fn from_path(path: &PathBuf, gallery: &Gallery, config: &Config) -> Result<Self, Error> {
+    pub async fn from_path(path: &PathBuf, gallery: &Gallery, provided_passwords: Option<Passwords>, config: &Config) -> Result<Self, Error> {
         let mut path_current = path.clone();
         let mut path_parent = path_current.parent().map(|p| p.to_path_buf());
         let path_navigate_up = path_parent.clone().map(|p| p.to_path_buf());
@@ -58,7 +67,7 @@ impl NavData {
         let path_split_open = path_split.clone();
         let mut current = path_split.last().map(|s| s.clone()).unwrap_or("/".to_string());
         let current_open = current.clone();
-        let mut subdirs = photos::list_subdirs(&path_current, &config.PHOTOS_DIR, false, true).await?;
+        let mut subdirs = photos::list_subdirs(&path_current, &config.PHOTOS_DIR, false, None, true).await?;
         let mut open_subdir: Option<String> = None;
 
         // If this directory doesn't contain subdirectories, keep showing its parent instead and simply mark it as 'open'
@@ -69,10 +78,7 @@ impl NavData {
             path_current = path_parent.unwrap_or_default().to_path_buf();
             path_parent = path_current.parent().map(|p| p.to_path_buf());
             is_root = path_parent.is_none();
-            subdirs = photos::list_subdirs(&path_current, &config.PHOTOS_DIR, false, true).await?;
-            if !subdirs.contains(&open_subdir.as_ref().unwrap()) {
-                subdirs.push(open_subdir.as_ref().unwrap().clone());
-            }
+            subdirs = photos::list_subdirs(&path_current, &config.PHOTOS_DIR, false, Some(&open_subdir.as_ref().unwrap()), true).await?;
         };
         let parent = if path_split.len() >= 2 {
             path_split.get(path_split.len() - 2).map(|s| s.clone()).unwrap_or("/".to_string())
@@ -108,13 +114,21 @@ impl NavData {
 
         // Check which subdirs are locked
         let mut locked_subdirs: Vec<String> = Vec::new();
+        let mut unlocked_subdirs: Vec<String> = Vec::new();
         let passwords = gallery.get_passwords().await;
         for subdir in &subdirs {
             let mut subdir_path = path_current.clone();
             subdir_path.push(subdir);
             let subdir_path_str = subdir_path.to_string_lossy().to_string();
             if passwords.contains_key(&subdir_path_str) {
-                locked_subdirs.push(subdir_path_str);
+                let unlocked = provided_passwords.as_ref()
+                    .and_then(|v| Some(v.contains_key(&subdir_path_str)))
+                    .unwrap_or(false);
+                if unlocked {
+                    unlocked_subdirs.push(subdir.clone());
+                } else {
+                    locked_subdirs.push(subdir.clone());
+                }
             }
         }
 
@@ -136,6 +150,7 @@ impl NavData {
             subdirs_with_urls,
             open_subdir,
             locked_subdirs,
+            unlocked_subdirs,
         })
     }
 
