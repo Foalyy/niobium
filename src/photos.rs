@@ -6,7 +6,7 @@ use std::cmp::min;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::{self, Write};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -303,6 +303,7 @@ pub type GalleryContent = HashMap<String, Vec<CachedPhoto>>;
 pub struct Gallery {
     gallery: RwLock<GalleryContent>,
     photos: RwLock<HashMap<UID, CachedPhoto>>,
+    subdirs: RwLock<HashMap<String, Subdirs>>,
     passwords: RwLock<HashMap<String, String>>,
     counts: RwLock<HashMap<String, HashMap<Vec<String>, usize>>>,
 }
@@ -314,6 +315,7 @@ impl Gallery {
         Self {
             gallery: RwLock::new(HashMap::new()),
             photos: RwLock::new(HashMap::new()),
+            subdirs: RwLock::new(HashMap::new()),
             passwords: RwLock::new(HashMap::new()),
             counts: RwLock::new(HashMap::new()),
         }
@@ -735,14 +737,15 @@ impl Gallery {
             // If the INDEX_SUBDIRS config is enabled, recursively load photos from subdirectories
             if main_config.INDEX_SUBDIRS {
                 // Find the list of valid subdirectories in the path, in the filesystem
-                let subdirs = list_subdirs(&rel_path, &main_config.PHOTOS_DIR, true, None, true).await?;
+                let subdirs = list_subdirs(&rel_path, main_config).await?;
+                let subdirs_names = subdirs.list_names();
 
                 // Clean obsolete subdirectories (that do not correspond to a subdirectory in the photos folder) from the cache folder
-                let subdirs_in_cache = list_subdirs(&rel_path, &main_config.CACHE_DIR, true, None, false).await?;
+                let subdirs_in_cache = list_subdirs_in_cache(&rel_path, main_config).await?;
                 if !subdirs_in_cache.is_empty() {
                     let mut subdirs_in_cache_to_remove: Vec<PathBuf> = Vec::new();
                     for subdir in subdirs_in_cache {
-                        if !subdirs.contains(&subdir) {
+                        if !subdirs_names.contains(&&subdir) {
                             let mut subdir_path = PathBuf::from(&main_config.CACHE_DIR);
                             subdir_path.push(&rel_path);
                             subdir_path.push(&subdir);
@@ -765,9 +768,15 @@ impl Gallery {
                     }
                 }
 
+                // Remember the subdirs internally
+                {
+                    let mut subdirs_lock = self.subdirs.write().await;
+                    subdirs_lock.insert(rel_path.to_string_lossy().to_string(), subdirs.clone());
+                }
+
                 // Load subdirectories recursively
                 if !subdirs.is_empty() {
-                    for subdir in subdirs {
+                    for subdir in subdirs.list_names() {
                         let mut subdir_rel_path = rel_path.clone();
                         subdir_rel_path.push(&subdir);
                         let mut subdir_full_path = full_path.clone();
@@ -1017,7 +1026,6 @@ impl Gallery {
         }
 
         // Update the counts of photos
-        println!("Calculating photos count...");
         self.update_counts().await;
 
         // Good job.
@@ -1072,6 +1080,25 @@ impl Gallery {
         }
     }
 
+    // Return the list of known non-hidden subdirectories for the given path
+    pub async fn get_subdirs(&self, path: &PathBuf, always_include: Option<&String>) -> Vec<String> {
+        let subdirs_lock = self.subdirs.read().await;
+        if let Some(subdirs) = subdirs_lock.get(&path.to_string_lossy().to_string()) {
+            let mut subdirs = subdirs.list_visible();
+            if let Some(always_include) = always_include {
+                if !subdirs.contains_name(always_include) {
+                    subdirs.push(Subdir::new(always_include.clone(), false));
+                }
+            }
+            subdirs.sort();
+            subdirs.list_names_visible_owned()
+        } else {
+            // This path is not found, return an empty list
+            Vec::new()
+        }
+    }
+
+    // Return a read lock on the internal list of passwords
     pub async fn get_passwords(&self) -> RwLockReadGuard<HashMap<String, String>> {
         self.passwords.read().await
     }
@@ -1222,18 +1249,104 @@ async fn check_config_dir(path: &PathBuf) -> Result<(), Error> {
 }
 
 
+#[derive(Clone)]
+struct Subdir {
+    name: String,
+    hidden: bool,
+}
+
+impl Subdir {
+    fn new(name: String, hidden: bool) -> Self {
+        Self { name, hidden }
+    }
+}
+
+impl PartialEq for Subdir {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl PartialOrd for Subdir {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.hidden.partial_cmp(&other.hidden)
+    }
+}
+
+#[derive(Clone)]
+struct Subdirs {
+    subdirs: Vec<Subdir>,
+}
+
+impl Subdirs {
+    fn new() -> Self {
+        Self {
+            subdirs: Vec::new(),
+        }
+    }
+
+    fn contains_name(&self, name: &str) -> bool {
+        self.iter().any(|s| s.name == name)
+    }
+
+    fn sort(&mut self) {
+        self.subdirs.sort_by(|a, b| natord::compare_ignore_case(&a.name, &b.name));
+    }
+
+    fn list_visible(&self) -> Subdirs {
+        let subdirs = self.subdirs.iter()
+            .filter(|s| !s.hidden)
+            .map(|s| s.clone())
+            .collect::<Vec<Subdir>>();
+        Self {
+            subdirs,
+        }
+    }
+
+    fn list_names(&self) -> Vec<&String> {
+        self.subdirs.iter()
+            .map(|subdir| &subdir.name)
+            .collect::<Vec<_>>()
+    }
+
+    fn list_names_visible(&self) -> Vec<&String> {
+        self.subdirs.iter()
+            .filter(|subdir| !subdir.hidden)
+            .map(|subdir| &subdir.name)
+            .collect::<Vec<_>>()
+    }
+
+    fn list_names_visible_owned(&self) -> Vec<String> {
+        self.list_names_visible().iter()
+            .map(|&s| s.clone())
+            .collect::<Vec<String>>()
+    }
+}
+
+impl Deref for Subdirs {
+    type Target = Vec<Subdir>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.subdirs
+    }
+}
+
+impl DerefMut for Subdirs {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.subdirs
+    }
+}
+
+
 /// Return the list of valid subdirectories in the given path in the photos folder
-pub async fn list_subdirs(path: &PathBuf, folder: &str, include_hidden: bool, error_if_missing: bool) -> Result<Vec<String>, Error> {
-    let mut subdirs: Vec<String> = Vec::new();
-    let mut full_path = PathBuf::from(folder);
+async fn list_subdirs(path: &PathBuf, config: &Config) -> Result<Subdirs, Error> {
+    let mut subdirs = Subdirs::new();
+    let mut full_path = PathBuf::from(&config.PHOTOS_DIR);
     full_path.push(path);
 
     // Try to open a Stream to the content of this path
     let dir = match fs::read_dir(&full_path).await {
         Ok(dir) => dir,
-
-        // This directory doesn't exist, but error_is_missing is set to false, just return as if the directory is empty
-        Err(error) if error.kind() == io::ErrorKind::NotFound && !error_if_missing => return Ok(Vec::new()),
 
         // Return any other error directly
         Err(error) => return Err(Error::FileError(error, full_path.clone())),
@@ -1255,15 +1368,49 @@ pub async fn list_subdirs(path: &PathBuf, folder: &str, include_hidden: bool, er
                         eprintln!("Warning : unable to deserialize local config file in \"{}\" : {}", subdir_path.display(), error);
                         Config::default()
                     });
-                    if always_include == Some(&dir_name) || (subdir_config.INDEX && (include_hidden || !subdir_config.HIDDEN)) {
-                        subdirs.push(dir_name);
+                    if subdir_config.INDEX {
+                        subdirs.push(Subdir::new(dir_name, subdir_config.HIDDEN));
                     }
                 }
             }
         }
     }
 
-    subdirs.sort_by(|a, b| natord::compare_ignore_case(a, b));
+    subdirs.sort();
+    Ok(subdirs)
+}
+
+
+/// Return the list of the names of the valid subdirectories in the given path in the cache folder
+async fn list_subdirs_in_cache(path: &PathBuf, config: &Config) -> Result<Vec<String>, Error> {
+    let mut subdirs: Vec<String> = Vec::new();
+    let mut full_path = PathBuf::from(&config.CACHE_DIR);
+    full_path.push(path);
+
+    // Try to open a Stream to the content of this path
+    let dir = match fs::read_dir(&full_path).await {
+        Ok(dir) => dir,
+
+        // This directory doesn't exist, just return as if the directory is empty
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+
+        // Return any other error directly
+        Err(error) => return Err(Error::FileError(error, full_path.clone())),
+    };
+    let mut dir_stream = ReadDirStream::new(dir);
+
+    // Iterate over the entries found in this path
+    while let Some(entry) = dir_stream.next().await {
+        let entry = entry.map_err(|e| Error::FileError(e, full_path.clone()))?;
+        if let Ok(file_type) = entry.file_type().await {
+            if let Ok(dir_name) = entry.file_name().into_string() {
+                if file_type.is_dir() && !dir_name.starts_with(".") {
+                    subdirs.push(dir_name);
+                }
+            }
+        }
+    }
+
     Ok(subdirs)
 }
 

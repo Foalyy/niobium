@@ -1,7 +1,9 @@
 use std::path::{PathBuf, Component};
 use rocket::serde::Serialize;
 
-use crate::{photos::{self, Gallery}, config::Config, Error, password::Passwords};
+use crate::photos::Gallery;
+use crate::Error;
+use crate::password::Passwords;
 
 /// Data used to fill the template for the navigation panel
 #[derive(Serialize, Debug, Default)]
@@ -58,7 +60,7 @@ impl NavData {
     }
 
     /// Generate a full NavaData struct based on the given path and config
-    pub async fn from_path(path: &PathBuf, gallery: &Gallery, provided_passwords: Option<Passwords>, config: &Config) -> Result<Self, Error> {
+    pub async fn from_path(path: &PathBuf, gallery: &Gallery, provided_passwords: Option<Passwords>) -> Result<Self, Error> {
         let mut path_current = path.clone();
         let mut path_parent = path_current.parent().map(|p| p.to_path_buf());
         let path_navigate_up = path_parent.clone().map(|p| p.to_path_buf());
@@ -67,7 +69,7 @@ impl NavData {
         let path_split_open = path_split.clone();
         let mut current = path_split.last().map(|s| s.clone()).unwrap_or("/".to_string());
         let current_open = current.clone();
-        let mut subdirs = photos::list_subdirs(&path_current, &config.PHOTOS_DIR, false, None, true).await?;
+        let mut subdirs = gallery.get_subdirs(&path_current, None).await;
         let mut open_subdir: Option<String> = None;
 
         // If this directory doesn't contain subdirectories, keep showing its parent instead and simply mark it as 'open'
@@ -78,7 +80,7 @@ impl NavData {
             path_current = path_parent.unwrap_or_default().to_path_buf();
             path_parent = path_current.parent().map(|p| p.to_path_buf());
             is_root = path_parent.is_none();
-            subdirs = photos::list_subdirs(&path_current, &config.PHOTOS_DIR, false, Some(&open_subdir.as_ref().unwrap()), true).await?;
+            subdirs = gallery.get_subdirs(&path_current, Some(&open_subdir.as_ref().unwrap())).await;
         };
         let parent = if path_split.len() >= 2 {
             path_split.get(path_split.len() - 2).map(|s| s.clone()).unwrap_or("/".to_string())

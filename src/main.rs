@@ -81,7 +81,7 @@ async fn get_gallery(path: PathBuf, gallery: &State<Gallery>, config: &State<Con
             // Check if this path exists
             if gallery.path_exists(&path).await {
                 // This path exists in the gallery, calculate the content of the nav panel
-                match NavData::from_path(&path, &gallery, None, &config).await {
+                match NavData::from_path(&path, &gallery, None).await {
                     // Render the template
                     Ok(nav_data) => PageResult::Page(Template::render("main", context! {
                         config: config.inner(),
@@ -177,7 +177,7 @@ async fn get_nav(path: PathBuf, gallery: &State<Gallery>, config: &State<Config>
     match gallery.check_password(&path, cookies, &password).await {
         // Either no password is required or a valid one has been provided
         Ok(passwords) => {
-            match NavData::from_path(&path, &gallery, Some(passwords), &config).await {
+            match NavData::from_path(&path, &gallery, Some(passwords)).await {
                 Ok(nav_data) => PageResult::Page(Template::render("nav", context! {
                     config: &config.inner(),
                     nav: nav_data,
