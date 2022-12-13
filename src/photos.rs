@@ -304,6 +304,7 @@ pub struct Gallery {
     gallery: RwLock<GalleryContent>,
     photos: RwLock<HashMap<UID, CachedPhoto>>,
     passwords: RwLock<HashMap<String, String>>,
+    counts: RwLock<HashMap<String, HashMap<Vec<String>, usize>>>,
 }
 
 impl Gallery {
@@ -314,6 +315,7 @@ impl Gallery {
             gallery: RwLock::new(HashMap::new()),
             photos: RwLock::new(HashMap::new()),
             passwords: RwLock::new(HashMap::new()),
+            counts: RwLock::new(HashMap::new()),
         }
     }
 
@@ -398,8 +400,25 @@ impl Gallery {
         
         let gallery_read_lock = self.gallery.read().await;
         if gallery_read_lock.contains_key(&path) {
+            // All photos available in this path (including some that may not be displayed to the user, if they
+            // require a password)
             let photos = gallery_read_lock.get(&path).unwrap();
-            let n_photos = photos.len();
+
+            // Compute the number of available photos for the set of passwords provided
+            let mut n_photos = 0;
+            let counts_lock = self.counts.read().await;
+            let counts_in_path = counts_lock.get(&path).unwrap();
+            'loop_aggregates: for (required_passwords, count) in counts_in_path {
+                // Check that all required passwords for this count are provided
+                for password in required_passwords {
+                    if !provided_passwords.contains_key(password) {
+                        continue 'loop_aggregates;
+                    }
+                }
+
+                // Add to the total
+                n_photos += count;
+            }
     
             // Compute pagination
             let mut start = start.unwrap_or(0);
@@ -997,8 +1016,60 @@ impl Gallery {
             ).await?;
         }
 
+        // Update the counts of photos
+        println!("Calculating photos count...");
+        self.update_counts().await;
+
         // Good job.
         Ok(())
+    }
+
+    /// Recalculate the internal `counts` data structure based on the current `gallery` : for each path,
+    /// `counts` will aggregate the number of photos based on the exact combination of passwords they
+    /// require.
+    async fn update_counts(&self) {
+        // Acquire locks on the gallery's internal data structures
+        let mut counts_lock = self.counts.write().await;
+        let gallery_lock = self.gallery.read().await;
+
+        // Reset the counts
+        counts_lock.clear();
+
+        // Process each path in the gallery
+        for (path, photos) in gallery_lock.deref() {
+            // Aggregate of the number of photos found which require a certain list of passwords
+            let mut counts_in_path: HashMap<Vec<String>, usize> = HashMap::new();
+
+            // Process each photo in this path
+            for photo in photos {
+                // List of passwords required to access this photo
+                let mut photo_passwords = photo.passwords.iter().map(|(p, _)| p).collect::<Vec<&String>>();
+                photo_passwords.sort_unstable();
+
+                // Try to find this list of passwords in the current hashmap
+                let mut key_found = None;
+                for key in counts_in_path.keys() {
+                    let key_pw = key.iter().collect::<Vec<&String>>();
+                    if key_pw == photo_passwords {
+                        key_found = Some(key.clone());
+                        break;
+                    }
+                }
+
+                // If this list of passwords already exists, increment its count
+                if let Some(key_found) = key_found {
+                    *counts_in_path.get_mut(&key_found).unwrap() += 1;
+                } else {
+                    // Otherwise, insert it with an initial value of 1
+                    let mut new_key = photo_passwords.iter().map(|&s| s.clone()).collect::<Vec<String>>();
+                    new_key.sort_unstable();
+                    counts_in_path.insert(new_key, 1);
+                }
+            }
+            
+            // Add the counts for this path to the main hashmap
+            counts_lock.insert(path.clone(), counts_in_path);
+        }
     }
 
     pub async fn get_passwords(&self) -> RwLockReadGuard<HashMap<String, String>> {
@@ -1032,12 +1103,13 @@ impl<'a> GalleryReadLock<'a> {
 
 pub struct GalleryReadIterator<'a> {
     lock: &'a GalleryReadLock<'a>,
-    counter: usize,
+    index: usize, // Current index in the collection, relative to lock.start
+    counter: usize, // Number of photos that have currently be returned to the user, <= index
 }
 
 impl<'a> GalleryReadIterator<'a> {
     fn new(lock: &'a GalleryReadLock<'a>) -> Self {
-        Self { lock, counter: 0 }
+        Self { lock, index: 0, counter: 0 }
     }
 }
 
@@ -1049,8 +1121,8 @@ impl<'a> Iterator for GalleryReadIterator<'a> {
         let photos = self.lock.guard.get(&self.lock.path).unwrap();
         'find_a_photo: while self.counter < self.lock.max_count {
             // Get the next photo
-            if let Some(photo) = photos.get(self.lock.start + self.counter) {
-                self.counter += 1;
+            if let Some(photo) = photos.get(self.lock.start + self.index) {
+                self.index += 1;
 
                 // Check if this photo requires some passwords
                 for (required_password_path, required_password) in &photo.passwords {
@@ -1064,6 +1136,8 @@ impl<'a> Iterator for GalleryReadIterator<'a> {
                         continue 'find_a_photo;
                     }
                 }
+
+                self.counter += 1;
                 return Some(&photo.photo);
 
             } else {
