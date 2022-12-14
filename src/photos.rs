@@ -306,6 +306,7 @@ pub struct Gallery {
     subdirs: RwLock<HashMap<String, Subdirs>>,
     passwords: RwLock<HashMap<String, String>>,
     counts: RwLock<HashMap<String, HashMap<Vec<String>, usize>>>,
+    subdirs_configs: RwLock<HashMap<String, Config>>,
 }
 
 impl Gallery {
@@ -318,6 +319,7 @@ impl Gallery {
             subdirs: RwLock::new(HashMap::new()),
             passwords: RwLock::new(HashMap::new()),
             counts: RwLock::new(HashMap::new()),
+            subdirs_configs: RwLock::new(HashMap::new()),
         }
     }
 
@@ -564,6 +566,8 @@ impl Gallery {
         ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>>
     {
         Box::pin(async move {
+            let rel_path_str = rel_path.to_string_lossy().to_string();
+
             // Append this path to the list of paths found
             if let Some(paths_found) = paths_found {
                 paths_found.push(rel_path.clone());
@@ -578,6 +582,13 @@ impl Gallery {
             Config::update_with_subdir(&full_path, &mut cfg);
             configs_stack.push((rel_path.clone(), cfg));
             let subdir_config = &configs_stack.last().unwrap().1;
+            match Config::from_table(subdir_config.clone()) {
+                Ok(config) => {
+                    let mut subdirs_configs_lock = self.subdirs_configs.write().await;
+                    subdirs_configs_lock.insert(rel_path_str.clone(), config);
+                },
+                Err(error) => eprintln!("Warning : unable to read config in {} : {}", rel_path.display(), error),
+            }
 
             // If this directory is password-protected, add it to the list
             let password = match subdir_config.get("PASSWORD") {
@@ -590,7 +601,7 @@ impl Gallery {
                 None => "".to_string(),
             };
             if password.len() > 0 {
-                self.passwords.write().await.insert(rel_path.to_string_lossy().to_string(), password);
+                self.passwords.write().await.insert(rel_path_str.clone(), password);
             }
 
             // List the files inside this path in the photos directory
@@ -774,7 +785,7 @@ impl Gallery {
                 // Remember the subdirs internally
                 {
                     let mut subdirs_lock = self.subdirs.write().await;
-                    subdirs_lock.insert(rel_path.to_string_lossy().to_string(), subdirs.clone());
+                    subdirs_lock.insert(rel_path_str.clone(), subdirs.clone());
                 }
 
                 // Load subdirectories recursively
@@ -1030,6 +1041,17 @@ impl Gallery {
 
         // Update the counts of photos
         self.update_counts().await;
+
+        // Apply REVERSE_SORT_ORDER to the gallery
+        let mut gallery_lock = self.gallery.write().await;
+        let subdirs_configs_lock = self.subdirs_configs.read().await;
+        for (path, config) in subdirs_configs_lock.deref() {
+            if config.REVERSE_SORT_ORDER {
+                if let Some(ref mut photos) = gallery_lock.get_mut(path) {
+                    photos.reverse();
+                }
+            }
+        }
 
         // Good job.
         Ok(())
