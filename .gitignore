@@ -1,6 +1,8 @@
 __pycache__
 venv
-*.sqlite
+*.sqlite*
 cache/*
 photos/*
 .secret
+target
+Cargo.lock
