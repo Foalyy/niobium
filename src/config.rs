@@ -22,36 +22,72 @@ pub struct Config {
     /// Default : 127.0.0.1
     #[serde(default="config_default_address")]
     pub ADDRESS: String,
-   
+
     /// Port to serve on.
     /// Default : 8000
     #[serde(default="config_default_port")]
     pub PORT: u16,
-    
+
     /// Title displayed in the page title and the top of the navigation panel.
+    /// Default : "Niobium"
     #[serde(default="config_default_title")]
     pub TITLE: String,
-    
+
     /// Instagram handle to link to in the dedicated button at the upper right,
     /// leave empty to remove the button.
+    /// Default : (empty)
     #[serde(default)]
     pub INSTAGRAM: String,
 
-    /// Path to the photos directory, default is `photos/` in the app's folder.
+    /// Path to the photos folder containing the photos to display.
     /// Write access is not required.
+    /// Default : "photos" (in the app's folder)
     #[serde(default="config_default_photos_dir")]
     pub PHOTOS_DIR: String,
 
-    /// Path to the cache directory, default is `cache/` in the app's folder.
-    /// Write access is required
+    /// Path to the cache folder that will be used by the app to store thumbnails.
+    /// Write access is required.
+    /// Default : "cache" (in the app's folder)
     #[serde(default="config_default_cache_dir")]
     pub CACHE_DIR: String,
-    
+
+    /// Path to the SQLite database file used by the app to store the photos index. It will
+    /// be automatically created during the first launch, but write access to the containing
+    /// folder is required.
+    /// Default : "niobium.sqlite" (in the app's folder)
+    #[serde(default="config_default_database_path")]
+    pub DATABASE_PATH: String,
+
     /// If enabled, the app will index subdirectories recursively in the photos folder.
     /// Default : true
     #[serde(default="config_default_true")]
     pub INDEX_SUBDIRS: bool,
-    
+
+    /// Number of parallel worker tasks that will be spawned when loading new photos into the
+    /// database.
+    /// Default : 16
+    #[serde(default="config_default_loading_workers")]
+    pub LOADING_WORKERS: usize,
+
+    /// If enable, the app will try to read EXIF metadata of photos and save them in the
+    /// database.
+    /// Default : true
+    #[serde(default="config_default_true")]
+    pub READ_EXIF: bool,
+
+    /// If enabled, thumbnails will be generated immediately when the photos are loaded into
+    /// the database; otherwise they will be generated on demand when requested by a browser
+    /// for the first time.
+    /// Default : false
+    #[serde(default)]
+    pub PRE_GENERATE_THUMBNAILS: bool,
+
+    /// Configure a password needed to access this gallery. Leave empty to disable.
+    /// Default : empty (no password needed)
+    /// This setting is overridable.
+    #[serde(default)]
+    pub PASSWORD: String,
+
     /// If enabled, the grid display for a requested path will show every photo available in
     /// its subdirectories (therefore the root directory will show every photo in the database).
     /// Otherwise, only the photos actually inside the requested path will be shown, most like
@@ -60,23 +96,18 @@ pub struct Config {
     /// This setting is overridable.
     #[serde(default="config_default_true")]
     pub SHOW_PHOTOS_FROM_SUBDIRS: bool,
-    
+
     /// If enabled, a navigation panel will be displayed when there are subdirectories in the
     /// photos folder. Otherwise, only direct links will allow users to access subdirectories.
     /// Default : true
     #[serde(default="config_default_true")]
     pub SHOW_NAVIGATION_PANEL: bool,
-    
+
     /// If enabled, the navigation will be open by default when there are subdirectories in
     /// the requested path.
     /// Default : true
     #[serde(default="config_default_true")]
     pub OPEN_NAVIGATION_PANEL_BY_DEFAULT: bool,
-    
-    /// Path to the SQLite database file.
-    /// Default : "niobium.sqlite" in the app's folder
-    #[serde(default="config_default_database_path")]
-    pub DATABASE_PATH: String,
     
     /// Fields(s) to use to sort the photos being displayed. This can be a single field or a
     /// comma-separated list of fields for multi-ordering. Available fields : `id`,
@@ -86,26 +117,26 @@ pub struct Config {
     /// This setting is overridable.
     #[serde(default="config_default_sort_order")]
     pub SORT_ORDER: String,
-    
+
     /// If enabled, the sort order of the photos will be reversed.
     /// Default : false
     /// This setting is overridable.
     #[serde(default)]
     pub REVERSE_SORT_ORDER: bool,
-    
-    /// Configure a password needed to access this gallery. Leave empty to disable.
-    /// Default : empty (no password needed)
-    /// This setting is overridable.
-    #[serde(default)]
-    pub PASSWORD: String,
-    
+
     /// Height of a single row displayed in grid view, as a percent of the browser's viewport
     /// height. For example, `20` will show up to 5 rows at a time. The user can change it
     /// using Zoom+ and Zoom- buttons in the interface.
     /// Default : 23 (show 4 rows with a hint of more at the bottom)
     #[serde(default="config_default_row_height")]
     pub DEFAULT_ROW_HEIGHT: usize,
-    
+
+    /// Percentage by which the grid's row height is modified every time the user presses the
+    /// Zoom+ / Zoom- buttons.
+    /// Default : 10
+    #[serde(default="config_default_row_height_step")]
+    pub ROW_HEIGHT_STEP: usize,
+
     /// In order to display a neat grid with photos of arbitrary ratios, the grid needs to
     /// crop some photos. This setting defines the maximum amount of crop that can be applied
     /// before giving up and leaving holes in the grid.
@@ -114,97 +145,73 @@ pub struct Config {
     /// Default : 2
     #[serde(default="config_default_max_zoom")]
     pub MAX_CROP: usize,
-    
-    /// Percentage by which the grid's row height is modified every time the user presses the
-    /// Zoom+ / Zoom- buttons.
-    /// Default : 10
-    #[serde(default="config_default_row_height_step")]
-    pub ROW_HEIGHT_STEP: usize,
-    
-    /// If enabled, the Loupe view will show a button allowing the user to download the photo.
-    /// in original quality
-    /// Default : true
-    #[serde(default="config_default_true")]
-    pub SHOW_DOWNLOAD_BUTTON: bool,
-    
-    /// Delay (in milliseconds) to wait before switching to the next photo in Slideshow mode.
-    /// Default : 5000
-    #[serde(default="config_default_slideshow_delay")]
-    pub SLIDESHOW_DELAY: usize,
-    
-    /// Max size of thumbnails on any side, in pixels.
-    /// Default : 600
-    #[serde(default="config_default_thumbnail_max_size")]
-    pub THUMBNAIL_MAX_SIZE: usize,
-    
-    /// Quality used to reencode thumbnails images, in percent.
-    /// Default : 75
-    #[serde(default="config_default_thumbnail_quality")]
-    pub THUMBNAIL_QUALITY: usize,
-    
-    /// Max size of large-size images in Loupe view on any side, in pixels.
-    /// Default : 1920
-    #[serde(default="config_default_large_view_max_size")]
-    pub LARGE_VIEW_MAX_SIZE: usize,
-    
-    /// Quality used to reencode large-size images in Loupe view, in percent.
-    /// Default : 85
-    #[serde(default="config_default_large_view_quality")]
-    pub LARGE_VIEW_QUALITY: usize,
 
-    /// Image format used for resized photos in cache : JPEG or WEBP
-    /// Default : WEBP
-    #[serde(default="config_default_resized_image_format")]
-    pub RESIZED_IMAGE_FORMAT: ImageFormat,
-    
-    /// If enable, the app will try to read EXIF metadata of photos and save them in the
-    /// database.
-    /// Default : true
-    #[serde(default="config_default_true")]
-    pub READ_EXIF: bool,
-    
-    /// If enabled, show a button allowing the user to view metadata of photos (such
-    /// as camera model and aperture) in Loupe mode.
+    /// If enabled, show a button allowing the user to view metadata of photos (such as camera
+    /// model and aperture) in Loupe mode.
     /// Default : true
     #[serde(default="config_default_true")]
     pub SHOW_METADATA: bool,
-    
-    /// If enabled, the metadata will be visible by default (but can still be hidden by
-    /// the user). Requires `SHOW_METADATA` to be enabled.
+
+    /// If enabled, the metadata will be visible by default (but can still be hidden by the
+    /// user). Requires `SHOW_METADATA` to be enabled.
     /// Default : true
     #[serde(default="config_default_true")]
     pub METADATA_VISIBLE_BY_DEFAULT: bool,
-    
+
+    /// If enabled, the Loupe view will show a button allowing the user to download the photo
+    /// in original quality.
+    /// Default : true
+    #[serde(default="config_default_true")]
+    pub SHOW_DOWNLOAD_BUTTON: bool,
+
     /// Prefix used for the name of downloaded photos. The UID of the photo will be appended
     /// to it.
     /// Default : "niobium_"
     #[serde(default="config_default_dowload_prefix")]
     pub DOWNLOAD_PREFIX: String,
 
-    /// If enabled, thumbnails will be generated immediately when the photos are loaded into
-    /// the database; otherwise they will be generated on demand when requested by a browser
-    /// for the first time.
-    /// Default : false
-    #[serde(default)]
-    pub PRE_GENERATE_THUMBNAILS: bool,
-    
-    /// Number of parallel worker tasks that will be spawned when loading new photos into the
-    /// database.
-    /// Default : 16
-    #[serde(default="config_default_loading_workers")]
-    pub LOADING_WORKERS: usize,
+    /// Delay (in milliseconds) to wait before switching to the next photo in Slideshow mode.
+    /// Default : 5000 (5s)
+    #[serde(default="config_default_slideshow_delay")]
+    pub SLIDESHOW_DELAY: usize,
+
+    /// Max size of thumbnails on any side, in pixels.
+    /// Default : 600
+    #[serde(default="config_default_thumbnail_max_size")]
+    pub THUMBNAIL_MAX_SIZE: usize,
+
+    /// Quality used to reencode thumbnails images, in percent.
+    /// Default : 75
+    #[serde(default="config_default_thumbnail_quality")]
+    pub THUMBNAIL_QUALITY: usize,
+
+    /// Max size of large-size images in Loupe view on any side, in pixels.
+    /// Default : 1920
+    #[serde(default="config_default_large_view_max_size")]
+    pub LARGE_VIEW_MAX_SIZE: usize,
+
+    /// Quality used to reencode large-size images in Loupe view, in percent.
+    /// Default : 85
+    #[serde(default="config_default_large_view_quality")]
+    pub LARGE_VIEW_QUALITY: usize,
+
+    /// Image format used for resized photos in cache : JPEG or WEBP.
+    /// Default : WEBP
+    #[serde(default="config_default_resized_image_format")]
+    pub RESIZED_IMAGE_FORMAT: ImageFormat,
+
 
     // Only for subdirs :
-    
+
     /// If disabled, this directory will be ignored and no file inside it will be indexed.
     /// Default : true
     /// This setting is only allowed in subdirectories' config files.
     #[serde(default="config_default_true")]
     pub INDEX: bool,
-    
+
     /// If enabled, this folder will not be shown in the navigation panel, and a direct link
     /// will be required to access it.
-    /// Default : true
+    /// Default : false
     /// This setting is only allowed in subdirectories' config files.
     #[serde(default)]
     pub HIDDEN: bool,
@@ -367,7 +374,7 @@ fn config_default_database_path() -> String {
 }
 
 fn config_default_sort_order() -> String {
-    "id".to_string()
+    "filename".to_string()
 }
 
 fn config_default_row_height() -> usize {
