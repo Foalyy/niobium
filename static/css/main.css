@@ -450,6 +450,7 @@ body {
 .password-prompt-message {
     margin-top: 1.5em;
     transition: color 0.3s ease;
+    text-align: center;
 }
 
 .password-prompt-input-container {

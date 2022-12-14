@@ -707,11 +707,11 @@ impl Gallery {
                 let mut is_parent = false; // False for the first iteration, then set to true for the parent paths
                 let mut passwords: Vec<(String, String)> = Vec::new();
                 for (path, entry_config) in configs_stack[1..configs_stack.len()].iter().rev() {
-                    // If we are in a parent directory of the current path, stop adding photos when a SHOW_PHOTOS_FROM_SUBDIRS=false
-                    // or a HIDDEN=true are encountered
-                    let show_photos_from_subdir = entry_config.get("SHOW_PHOTOS_FROM_SUBDIRS").and_then(|v| v.as_bool()).unwrap_or(default_config.SHOW_PHOTOS_FROM_SUBDIRS);
-                    let hidden = entry_config.get("HIDDEN").and_then(|v| v.as_bool()).unwrap_or(default_config.HIDDEN);
-                    if is_parent && (!show_photos_from_subdir || hidden) {
+                    // If we are in a parent directory of the current path, stop adding photos when a SHOW_PHOTOS_FROM_SUBDIRS=false is encountered
+                    let show_photos_from_subdir = entry_config.get("SHOW_PHOTOS_FROM_SUBDIRS")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(default_config.SHOW_PHOTOS_FROM_SUBDIRS);
+                    if is_parent && !show_photos_from_subdir {
                         break;
                     }
 
@@ -726,6 +726,9 @@ impl Gallery {
                     }
 
                     // If the current path is marked as hidden, don't add the photos to the parents paths
+                    let hidden = entry_config.get("HIDDEN")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(default_config.HIDDEN);
                     if hidden {
                         break;
                     }
