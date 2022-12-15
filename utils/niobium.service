@@ -1,0 +1,12 @@
+[Unit]
+Description=Niobium
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/my_photos/
+ExecStart=/var/www/my_photos/niobium
+
+[Install]
+WantedBy=multi-user.target
