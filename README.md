@@ -1,15 +1,23 @@
 # Niobium
 
-<div style="text-align: center;">
-<img src="static/img/niobium.svg" style="width:50%; max-width: 15em;">
-<div style="font-size: 130%;">Modern, high-performance, web-based photo gallery viewer.</div>
-:framed_picture: :rocket: :sparkles:
+<div align="center">
+    <img src="static/img/niobium.svg" width="200">
+    <div>Modern, high-performance, web-based photo gallery viewer</div>
+    <div>:framed_picture: :sparkles: :rocket:</div>
 </div>
 
+- [1/ Installation](#hammer_and_wrench-1-installation)
+  - [1.1/ (Option A) Install using a release](#11-option-a-install-using-a-release)
+  - [1.1/ (Option B) Build from source](#11-option-b-build-from-source)
+  - [1.2/ Start as a daemon](#12-start-as-a-daemon)
+  - [1.3/ Set up the reverse proxy](#13-set-up-the-reverse-proxy)
+- [2/ Configuration](#gear-2-configuration)
+  - [2.1/ Main config file](#21-main-config-file)
+  - [2.2/ Subdirectories config files](#22-subdirectories-config-files)
 
-## 1. Installation
+## :hammer_and_wrench: 1/ Installation
 
-### 1.1 (Option A) Install using a release
+### 1.1/ *(Option A)* Install using a release (recommended)
 
 Example of how to install Niobium on Debian 11 in `/var/www/my_photos`, customize the paths as needed.
 
@@ -47,9 +55,9 @@ Start Niobium to make sure everything works fine. Note that photos indexing (and
 # ./niobium
 ```
 
-Niobium is now running, but for a more permanent installation, keep reading section 1.2.
+Niobium is now running, but for a more permanent installation, keep reading [section 1.2](#12-start-as-a-daemon).
 
-### 1.1 (Option B) Build from source
+### 1.1/ *(Option B)* Build from source
 
 Niobium is built with Rust, you will need a Rust compiler to compile it. Here is the simplest way to install one, following [official instructions](https://www.rust-lang.org/tools/install), which will install Cargo (an all-in-one tool to easily compile and run Rust programs) and an up-to-date Rust compiler :
 
@@ -82,7 +90,7 @@ Create a symlink to the binary into the main directory :
 ```
 
 
-### 1.2 Start as a daemon
+### 1.2/ Start as a daemon
 
 A sample `systemd` service file is provided in `utils/niobium.service`. You can customize it as necessary, and then install it :
 
@@ -103,11 +111,11 @@ journalctl -u niobium.service -f
 If your OS is not `systemd`-based or your religion forbids you from using `systemd`, adapt the daemon config file accordingly.
 
 
-### 1.3 Set up the reverse proxy
+### 1.3/ Set up the reverse proxy
 
 Example using Apache with a Let's Encrypt HTTPS certificate. We'll assume you want to host your photos on `photos.example.com`.
 
-Create a certificate :
+Get a certificate :
 ```
 # certbot certonly
 ```
@@ -153,9 +161,9 @@ Enable and start the virtualhost :
 ```
 
 
-## 2 Configuration
+## :gear: 2/ Configuration
 
-### 2.1 Main config file
+### 2.1/ Main config file
 
 The main config file, `niobium.config`, is self-documented, see below.
 
@@ -365,7 +373,7 @@ RESIZED_IMAGE_FORMAT = "WEBP"
 ```
 
 
-### 2.2 Subdirectories config files
+### 2.2/ Subdirectories config files
 
 When your photos folder is sorted into subdirectories, some settings can be customized for specific directories by creating a `.niobium.config` config file (note the leading dot in the filename) inside these directories. Available settings are those marked as "overridable" in the main config file.
 
