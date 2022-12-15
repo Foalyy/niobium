@@ -18,8 +18,8 @@ pub const FILENAME: &'static str = "niobium.config";
 #[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Config {
-    /// IP address to serve on.
-    /// Default : 127.0.0.1
+    /// IP address to serve on. Set to "0.0.0.0" to serve on all interfaces.
+    /// Default : 127.0.0.1 (only accessible locally)
     #[serde(default="config_default_address")]
     pub ADDRESS: String,
 
