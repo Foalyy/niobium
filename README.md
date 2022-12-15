@@ -12,6 +12,8 @@
 
 ### <div align="center">[:fire: Demo](https://photo.silica.io/)</div>
 
+*Interested in a hosted version for you or your clients? Contact me at the address displayed on [my profile](https://github.com/Foalyy).*
+
 - [1/ Installation](#hammer_and_wrench-1-installation)
   - [1.1/ (Option A) Install using a release](#11-option-a-install-using-a-release-recommended)
   - [1.1/ (Option B) Build from source](#11-option-b-build-from-source)
@@ -387,3 +389,13 @@ For example, you can :
 - ignore a certain subdirectory completely by setting `INDEX = false`
 - hide a subdirectory from the navigation panel by setting `HIDDEN = true`
 - specify a password required to access a subdirectory by setting `PASSWORD = "1337P455W0RD"`
+
+
+
+## :handshake: Acknowledgements
+
+Main icon based on `panorama` by Font-Awesome : [https://fontawesome.com/icons/panorama?s=solid&f=classic](https://fontawesome.com/icons/panorama?s=solid&f=classic)
+
+Backend built using the excellent Rust web framework Rocket :
+- [https://rocket.rs/](https://rocket.rs/)
+- [https://github.com/SergioBenitez/Rocket/](https://github.com/SergioBenitez/Rocket/)
