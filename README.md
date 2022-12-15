@@ -23,7 +23,7 @@ Example of how to install Niobium on Debian 11 in `/var/www/my_photos`, customiz
 
 ```
 # cd /var/www/
-# wget https://github.com/Foalyy/niobium/releases/download/0.2.0/niobium_0.2.0.zip
+# wget https://github.com/Foalyy/niobium/releases/download/v0.2.0/niobium_0.2.0.zip
 # unzip niobium_0.2.0.zip
 # mv niobium_0.2.0 my_photos
 # cd my_photos
