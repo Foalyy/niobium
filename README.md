@@ -1,13 +1,19 @@
 # Niobium
 
-<div align="center">
-    <img src="static/img/niobium.svg" width="200">
-    <div>Modern, high-performance, web-based photo gallery viewer</div>
-    <div>:framed_picture: :sparkles: :rocket:</div>
-</div>
+
+<div align="center"><img src="static/img/niobium.svg" width="200"></div>
+
+### <div align="center">Modern, high-performance, web-based photo gallery viewer</div>
+
+### <div align="center">:framed_picture: :sparkles: :rocket:</div>
+
+
+![Screenshot](https://user-images.githubusercontent.com/2955191/207928165-247f39c1-826a-481d-a7c0-08a3a804d301.jpg)
+
+### <div align="center">[:fire: Demo](https://photo.silica.io/)</div>
 
 - [1/ Installation](#hammer_and_wrench-1-installation)
-  - [1.1/ (Option A) Install using a release](#11-option-a-install-using-a-release)
+  - [1.1/ (Option A) Install using a release](#11-option-a-install-using-a-release-recommended)
   - [1.1/ (Option B) Build from source](#11-option-b-build-from-source)
   - [1.2/ Start as a daemon](#12-start-as-a-daemon)
   - [1.3/ Set up the reverse proxy](#13-set-up-the-reverse-proxy)
