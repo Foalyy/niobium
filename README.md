@@ -111,7 +111,7 @@ A sample `systemd` service file is provided in `utils/niobium.service`. You can 
 If you didn't start the app directly with `./niobium`, you can track the progress of the photos indexing using :
 
 ```
-journalctl -u niobium.service -f
+# journalctl -u niobium.service -f
 ```
 
 If your OS is not `systemd`-based or your religion forbids you from using `systemd`, adapt the daemon config file accordingly.
