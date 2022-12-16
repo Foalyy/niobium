@@ -45,6 +45,7 @@
                 <div class="navigation-panel-container invisible">
                     <div class="navigation-panel">
                         <div class="navigation-panel-content"></div>
+                        <div class="navigation-panel-pin"><i class="fa-solid fa-thumbtack fa-fw fa-rotate-by"></i></div>
                         <div class="navigation-panel-close"><i class="fa-solid fa-xmark fa-fw"></i></div>
                         <div class="loading loading-fullsize nav-loading">
                             <div class="spinner"><img src="/static/img/spinner.svg"></div>

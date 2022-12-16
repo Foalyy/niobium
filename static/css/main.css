@@ -30,7 +30,7 @@ body {
     font-family: 'Open Sans', sans-serif;
 }
 
-.no-scroll {
+body.nav-open {
     overflow-y: hidden;
 }
 
@@ -231,7 +231,7 @@ body {
 
 .navigation-panel-close {
     position: absolute;
-    bottom: 1.5rem;
+    top: 1.5rem;
     right: 1.5rem;
     width: 2rem;
     height: 2rem;
@@ -250,6 +250,10 @@ body {
 .navigation-panel-close:hover {
     color: var(--navigation-panel-highlight-color);
     background-color: #000000FF;
+}
+
+.navigation-panel-pin {
+    display: none;
 }
 
 .navigation-panel-container.invisible .navigation-panel-close {
@@ -809,9 +813,58 @@ body {
         right: -1rem;
     }
 
+    .navigation-panel-pin {
+        display: block;
+        position: absolute;
+        right: 1.5em;
+        top: 0.5em;
+        padding: 0.5em;
+        opacity: 0.5;
+        cursor: pointer;
+    }
+
+    .navigation-panel-pin .fa-rotate-by {
+        --fa-rotate-angle: 45deg;
+    }
+
     .loupe-prev, .loupe-next {
         align-items: center;
         padding-bottom: 0;
+    }
+
+    body.nav-pin.nav-open {
+        overflow-y: auto;
+    }
+
+    .nav-pin .grid-content {
+        position: relative;
+        left: 30rem;
+        z-index: 5;
+    }
+
+    .nav-pin .navigation-panel-container {
+        right: initial;
+        z-index: 1;
+    }
+
+    .nav-pin .navigation-panel-background {
+        width: 0;
+    }
+
+    .nav-pin .navigation-panel-close {
+        display: none;
+    }
+
+    .nav-pin .grid-actions-topleft {
+        display: none;
+    }
+
+    .nav-pin .navigation-panel-pin {
+        opacity: 1;
+    }
+    
+    .nav-pin .navigation-panel-pin .fa-rotate-by {
+        --fa-rotate-angle: 0deg;
     }
 }
 

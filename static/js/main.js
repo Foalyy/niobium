@@ -542,7 +542,7 @@ function gridZoomOut() {
 
 function openNavigationPanel(addToHistory=true) {
     $('.navigation-panel-container').removeClass('invisible');
-    $('body').addClass('no-scroll');
+    $('body').addClass('nav-open');
     if (addToHistory) {
         history.pushState({'url': window.location.pathname, 'gridURL': loadGridURL, 'navURL': loadNavURL, 'navPanelOpen': true}, '', window.location.pathname + '#nav');
     }
@@ -550,7 +550,7 @@ function openNavigationPanel(addToHistory=true) {
 
 function closeNavigationPanel(addToHistory=true) {
     $('.navigation-panel-container').addClass('invisible');
-    $('body').removeClass('no-scroll');
+    $('body').removeClass('nav-open');
     if (addToHistory) {
         history.pushState({'url': window.location.pathname, 'gridURL': loadGridURL, 'navURL': loadNavURL, 'navPanelOpen': false}, '', window.location.pathname);
     }
@@ -566,6 +566,10 @@ function toggleNavigationPanel() {
 
 function isNavigationPanelOpen() {
     return !$('.navigation-panel-container').hasClass('invisible');
+}
+
+function toggleNavigationPanelPin() {
+    $('body').toggleClass('nav-pin');
 }
 
 function navigationPanelPrev() {
@@ -976,6 +980,11 @@ $(function() {
     });
     $('.navigation-panel-close').on('click', function(event) {
         closeNavigationPanel();
+        event.preventDefault();
+        event.stopPropagation();
+    });
+    $('.navigation-panel-pin').on('click', function(event) {
+        toggleNavigationPanelPin();
         event.preventDefault();
         event.stopPropagation();
     });
