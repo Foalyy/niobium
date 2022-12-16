@@ -22,6 +22,7 @@
 - [2/ Configuration](#gear-2-configuration)
   - [2.1/ Main config file](#21-main-config-file)
   - [2.2/ Subdirectories config files](#22-subdirectories-config-files)
+- [3/ Reloading](#3-reloading)
 
 ## :hammer_and_wrench: 1/ Installation
 
@@ -390,6 +391,13 @@ For example, you can :
 - hide a subdirectory from the navigation panel by setting `HIDDEN = true`
 - specify a password required to access a subdirectory by setting `PASSWORD = "1337P455W0RD"`
 
+
+
+### 3/ Reloading
+
+When the app launches, the photos index is cached in memory to improve performances. If you add or remove photos from `PHOTOS_DIR`, or if you change some subdirectories configuration files, the index needs to be synchronized with the photos on disk. A full restart of the app will do the job, but the quickest way is to simply open the special `.reload` URL from any browser. For example, if your photos are accessible on `https://photos.example.com/`, simply open the page at `https://photos.example.com/.reload`. The photos index will be reloaded and synchronized with the internal database, and you will simply be redirected to the root page showing your new photos.
+
+This will *not* reload the main configuration file, but it *will* reload the `.niobium.config` configuration files in your photos folder.
 
 
 ## :handshake: Acknowledgements
