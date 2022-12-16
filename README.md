@@ -15,18 +15,19 @@
 *Interested in a hosted version for you or your clients? Contact me at the address displayed on [my profile](https://github.com/Foalyy).*
 
 - [1/ Installation](#hammer_and_wrench-1-installation)
-  - [1.1/ (Option A) Install using a release](#11-option-a-install-using-a-release-recommended)
-  - [1.1/ (Option B) Build from source](#11-option-b-build-from-source)
-  - [1.2/ Start as a daemon](#12-start-as-a-daemon)
-  - [1.3/ Set up the reverse proxy](#13-set-up-the-reverse-proxy)
+  - [1.1/ (Option A) Install using a release](#package-11-option-a-install-using-a-release-recommended)
+  - [1.1/ (Option B) Build from source](#wrench-11-option-b-build-from-source)
+  - [1.2/ Start as a daemon](#ghost-12-start-as-a-daemon)
+  - [1.3/ Set up the reverse proxy](#shield-13-set-up-the-reverse-proxy)
 - [2/ Configuration](#gear-2-configuration)
-  - [2.1/ Main config file](#21-main-config-file)
-  - [2.2/ Subdirectories config files](#22-subdirectories-config-files)
-- [3/ Reloading](#3-reloading)
+  - [2.1/ Main config file](#spiral_notepad-21-main-config-file)
+  - [2.2/ Subdirectories config files](#open_file_folder-22-subdirectories-config-files)
+- [3/ Reloading](#arrows_counterclockwise-3-reloading)
+- [4/ Acknowledgements](#handshake-4-acknowledgements)
 
 ## :hammer_and_wrench: 1/ Installation
 
-### 1.1/ *(Option A)* Install using a release (recommended)
+### :package: 1.1/ *(Option A)* Install using a release (recommended)
 
 Example of how to install Niobium on Debian 11 in `/var/www/my_photos`, customize the paths as needed.
 
@@ -66,7 +67,7 @@ Start Niobium to make sure everything works fine. Note that photos indexing (and
 
 Niobium is now running, but for a more permanent installation, keep reading [section 1.2](#12-start-as-a-daemon).
 
-### 1.1/ *(Option B)* Build from source
+### :wrench: 1.1/ *(Option B)* Build from source
 
 Niobium is built with Rust, you will need a Rust compiler to compile it. Here is the simplest way to install one, following [official instructions](https://www.rust-lang.org/tools/install), which will install Cargo (an all-in-one tool to easily compile and run Rust programs) and an up-to-date Rust compiler :
 
@@ -99,7 +100,7 @@ Create a symlink to the binary into the main directory :
 ```
 
 
-### 1.2/ Start as a daemon
+### :ghost: 1.2/ Start as a daemon
 
 A sample `systemd` service file is provided in `utils/niobium.service`. You can customize it as necessary, and then install it :
 
@@ -120,7 +121,9 @@ If you didn't start the app directly with `./niobium`, you can track the progres
 If your OS is not `systemd`-based or your religion forbids you from using `systemd`, adapt the daemon config file accordingly.
 
 
-### 1.3/ Set up the reverse proxy
+### :shield: 1.3/ Set up the reverse proxy
+
+Niobium can serve your files directly, but it is recommended to set it up behind a reverse proxy that will handle HTTPS.
 
 Example using Apache with a Let's Encrypt HTTPS certificate. We'll assume you want to host your photos on `photos.example.com`.
 
@@ -172,7 +175,7 @@ Enable and start the virtualhost :
 
 ## :gear: 2/ Configuration
 
-### 2.1/ Main config file
+### :spiral_notepad: 2.1/ Main config file
 
 The main config file, `niobium.config`, is self-documented, see below.
 
@@ -382,7 +385,7 @@ RESIZED_IMAGE_FORMAT = "WEBP"
 ```
 
 
-### 2.2/ Subdirectories config files
+### :open_file_folder: 2.2/ Subdirectories config files
 
 When your photos folder is sorted into subdirectories, some settings can be customized for specific directories by creating a `.niobium.config` config file (note the leading dot in the filename) inside these directories. Available settings are those marked as "overridable" in the main config file.
 
@@ -393,14 +396,14 @@ For example, you can :
 
 
 
-### 3/ Reloading
+## :arrows_counterclockwise: 3/ Reloading
 
 When the app launches, the photos index is cached in memory to improve performances. If you add or remove photos from `PHOTOS_DIR`, or if you change some subdirectories configuration files, the index needs to be synchronized with the photos on disk. A full restart of the app will do the job, but the quickest way is to simply open the special `.reload` URL from any browser. For example, if your photos are accessible on `https://photos.example.com/`, simply open the page at `https://photos.example.com/.reload`. The photos index will be reloaded and synchronized with the internal database, and you will simply be redirected to the root page showing your new photos.
 
 This will *not* reload the main configuration file, but it *will* reload the `.niobium.config` configuration files in your photos folder.
 
 
-## :handshake: Acknowledgements
+## :handshake: 4/ Acknowledgements
 
 Main icon based on `panorama` by Font-Awesome : [https://fontawesome.com/icons/panorama?s=solid&f=classic](https://fontawesome.com/icons/panorama?s=solid&f=classic)
 
