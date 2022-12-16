@@ -1098,7 +1098,7 @@ $(function() {
                 }
             }
 
-        } else if (event.code == 'Enter' && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
+        } else if ((event.code == 'Enter' || event.code == 'NumpadEnter') && !event.ctrlKey && !event.shiftKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
             if (isPasswordPromptOpen()) {
                 validatePasswordPrompt();

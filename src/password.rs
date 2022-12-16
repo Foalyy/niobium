@@ -88,8 +88,20 @@ pub enum PasswordError {
 impl PasswordError {
     pub fn message(&self) -> String {
         match self {
-            PasswordError::Required(path) => format!("A password is required to access \"{}\"", path),
-            PasswordError::Invalid(path) => format!("Invalid password for \"{}\"", path),
+            PasswordError::Required(path) => {
+                if path.is_empty() {
+                    format!("A password is required to access this gallery")
+                } else {
+                    format!("A password is required to access \"{}\"", path)
+                }
+            }
+            PasswordError::Invalid(path) => {
+                if path.is_empty() {
+                    format!("Invalid password")
+                } else {
+                    format!("Invalid password for \"{}\"", path)
+                }
+            }
         }
     }
 }

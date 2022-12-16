@@ -30,7 +30,7 @@ use tokio_stream::wrappers::ReadDirStream;
 use toml::value::Table;
 
 
-
+/// Main struct representing a photo and its metadata
 #[derive(Default, Serialize, Clone, Debug)]
 pub struct Photo {
     pub id: u32,
@@ -57,7 +57,7 @@ pub struct Photo {
 }
 
 impl Photo {
-    /// Try to open the photo file to extract its metadata and store them in the database.
+    /// Try to open the photo file to extract its metadata.
     /// If this has already been done according to the `metadata_parsed` field, this is a no-op.
     pub async fn parse_metadata(&mut self, read_exif: bool) -> Result<(), Error> {
         if self.metadata_parsed {
@@ -173,7 +173,7 @@ impl Photo {
     }
 
     async fn create_resized_from_params(&self, resized_type: ResizedType, image_format: ImageFormat, cache_dir: String, max_size: usize, quality: usize) -> Result<PathBuf, Error> {
-        // Extention according to the configure image format
+        // Extention according to the configured image format
         let file_extension = match image_format {
             ImageFormat::JPEG => "jpg",
             ImageFormat::WEBP => "webp",
@@ -189,7 +189,7 @@ impl Photo {
             return Ok(resized_file_path);
         }
 
-        // Extract parameter from the config
+        // Extract parameters from the config
         let file_path = &self.full_path;
         println!("Generating resized version ({}, max {}x{}, quality {}%) of \"{}\" in the cache directory... ",
             resized_type.prefix(),
@@ -491,6 +491,9 @@ impl Gallery {
             }
             path_current.pop();
         }
+        if let Some(password) = gallery_passwords.get("") {
+            required_passwords.insert("".to_string(), password.clone());
+        }
         let mut paths_requiring_passwords = required_passwords.keys().collect::<Vec<&String>>();
         paths_requiring_passwords.sort();
 
@@ -501,6 +504,7 @@ impl Gallery {
             // At least one password is required, check all of them in order
             for required_password_path in paths_requiring_passwords {
                 let required_password = required_passwords.get(required_password_path).unwrap();
+
                 // Check if a matching password was provided through the request guard (the Authorization header)
                 if let Some(user_provided_password) = request_password.as_string() {
                     // Check if the password matches
@@ -524,8 +528,11 @@ impl Gallery {
                         // It doesn't match : return "invalid password"
                         return Err(PasswordError::Invalid(required_password_path.clone()));
                     }
+                } else if let Some(_) = request_password.as_string() {
+                    // An invalid password was provided in the current request : return "invalid password"
+                    return Err(PasswordError::Invalid(required_password_path.clone()));
                 } else {
-                    // No password found : return "password required"
+                    // No password found in the request or the session cookies : return "password required"
                     return Err(PasswordError::Required(required_password_path.clone()));
                 }
             }
@@ -578,7 +585,9 @@ impl Gallery {
             // sibling directories), and put it on the stack
             let mut cfg = configs_stack.last().unwrap().1.clone();
             cfg.remove("HIDDEN"); // These settings don't propagate from the parent
-            cfg.remove("PASSWORD");
+            if rel_path != &PathBuf::new() {
+                cfg.remove("PASSWORD");
+            }
             Config::update_with_subdir(&full_path, &mut cfg);
             configs_stack.push((rel_path.clone(), cfg));
             let subdir_config = &configs_stack.last().unwrap().1;
@@ -727,7 +736,7 @@ impl Gallery {
                     }
 
                     // Remember that a password is required for this photo to be displayed
-                    if let Some(password) = entry_config.get("PASSWORD").and_then(|v| v.as_str()) {
+                    if let Some(password) = entry_config.get("PASSWORD").and_then(|v| v.as_str()).filter(|&s| !s.is_empty()) {
                         passwords.push((path.to_string_lossy().to_string(), password.to_string()));
                     }
 
