@@ -396,7 +396,7 @@ For example, you can :
 
 
 
-### :arrows_counterclockwise: 3/ Reloading
+## :arrows_counterclockwise: 3/ Reloading
 
 When the app launches, the photos index is cached in memory to improve performances. If you add or remove photos from `PHOTOS_DIR`, or if you change some subdirectories configuration files, the index needs to be synchronized with the photos on disk. A full restart of the app will do the job, but the quickest way is to simply open the special `.reload` URL from any browser. For example, if your photos are accessible on `https://photos.example.com/`, simply open the page at `https://photos.example.com/.reload`. The photos index will be reloaded and synchronized with the internal database, and you will simply be redirected to the root page showing your new photos.
 
