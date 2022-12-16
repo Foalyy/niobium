@@ -343,7 +343,7 @@ function setupImage(image, callback) {
             openLoupe(openGridItem);
         });
         if (callback != undefined) {
-            callback(gridItem);
+            callback(image.parents('.grid-item'));
         }
     });
     $(image).on('mouseenter', function(event) {
@@ -378,7 +378,7 @@ function loadPhoto(gridItem, callback) {
         request.open('GET', $(gridItem).data('load-url'), true);
         request.send();
     } else if ($(gridItem).children('.photo').length > 0 && $(gridItem).children('.photo').attr('src') == "") {
-        setupImage($(gridItem).children('.photo'))
+        setupImage($(gridItem).children('.photo'), callback)
     } else {
         if (callback != undefined) {
             callback(gridItem);
