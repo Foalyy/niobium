@@ -4,3 +4,5 @@ photos/*
 .secret
 target
 Cargo.lock
+.cspell/
+.vscode/
