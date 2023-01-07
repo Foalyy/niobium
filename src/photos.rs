@@ -2,8 +2,10 @@ use crate::config::Config;
 use crate::password::{self, OptionalPassword, PasswordError, Passwords};
 use crate::uid::UID;
 use crate::{db, Error};
+use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
+use image::{AnimationDecoder, Frame};
 use md5::{Digest, Md5};
 use rocket::futures::StreamExt;
 use rocket::http::{Cookie, CookieJar};
@@ -20,6 +22,7 @@ use rocket_db_pools::Database;
 use serde::Deserialize;
 use std::cmp::min;
 use std::collections::HashMap;
+use std::fs::File;
 use std::future::Future;
 use std::io::{self, Write};
 use std::ops::{Deref, DerefMut};
@@ -60,6 +63,10 @@ impl Photo {
     /// If this has already been done according to the `metadata_parsed` field, this is a no-op.
     #[allow(clippy::identity_op)]
     pub async fn parse_metadata(&mut self, read_exif: bool) -> Result<(), Error> {
+        if self.should_skip_parse_metadata() {
+            return Ok(());
+        }
+
         if self.metadata_parsed {
             // Metadata already parsed, nothing to do
             return Ok(());
@@ -180,6 +187,41 @@ impl Photo {
         Ok(())
     }
 
+    fn should_skip_parse_metadata(&self) -> bool {
+        self.image_format() == ImageFormat::GIF
+    }
+
+    fn image_format(&self) -> ImageFormat {
+        let filename = self.filename.to_string();
+
+        if filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
+            return ImageFormat::JPEG;
+        }
+
+        if filename.ends_with(".png") {
+            return ImageFormat::PNG;
+        }
+
+        if filename.ends_with(".gif") {
+            return ImageFormat::GIF;
+        }
+
+        if filename.ends_with(".webp") {
+            return ImageFormat::WEBP;
+        }
+
+        ImageFormat::WEBP
+    }
+
+    fn file_extension(&self) -> &str {
+        match self.image_format() {
+            ImageFormat::JPEG => "jpeg",
+            ImageFormat::GIF => "gif",
+            ImageFormat::PNG => "png",
+            ImageFormat::WEBP => "webp",
+        }
+    }
+
     /// Create a resized version of this photo in the cache folder
     async fn create_resized(
         &self,
@@ -199,6 +241,36 @@ impl Photo {
         .await
     }
 
+    fn resized_file_extension(&self, image_format: ImageFormat) -> &str {
+        match (self.image_format(), image_format) {
+            (
+                ImageFormat::JPEG | ImageFormat::PNG | ImageFormat::WEBP,
+                ImageFormat::JPEG | ImageFormat::PNG | ImageFormat::WEBP,
+            ) => image_format.into(),
+            (ImageFormat::GIF, ImageFormat::GIF) => "gif",
+            (_, _) => self.file_extension(),
+        }
+    }
+
+    fn resized_file_path(
+        &self,
+        resized_type: ResizedType,
+        image_format: ImageFormat,
+        cache_dir: &str,
+    ) -> PathBuf {
+        // Path of the resized version of this photo in the cache folder
+        let mut path = PathBuf::from(&cache_dir);
+        path.push(&self.path);
+        path.push(format!(
+            "{}_{}.{}",
+            resized_type.prefix(),
+            &self.uid,
+            // Extention according to the configured image format
+            self.resized_file_extension(image_format)
+        ));
+        path
+    }
+
     async fn create_resized_from_params(
         &self,
         resized_type: ResizedType,
@@ -207,21 +279,8 @@ impl Photo {
         max_size: usize,
         quality: usize,
     ) -> Result<PathBuf, Error> {
-        // Extention according to the configured image format
-        let file_extension = match image_format {
-            ImageFormat::JPEG => "jpg",
-            ImageFormat::WEBP => "webp",
-        };
-
         // Path of the resized version of this photo in the cache folder
-        let mut resized_file_path = PathBuf::from(&cache_dir);
-        resized_file_path.push(&self.path);
-        resized_file_path.push(format!(
-            "{}_{}.{}",
-            resized_type.prefix(),
-            &self.uid,
-            file_extension
-        ));
+        let resized_file_path = self.resized_file_path(resized_type, image_format, &cache_dir);
 
         // Check if the file already exists
         if resized_file_path.exists() {
@@ -277,17 +336,23 @@ impl Photo {
         let file = std::fs::File::create(&resized_file_path)
             .map_err(|e| Error::FileError(e, resized_file_path.clone()))?;
         let mut writer = std::io::BufWriter::new(file);
-        match image_format {
-            ImageFormat::JPEG => {
+        match (self.image_format(), image_format) {
+            (ImageFormat::JPEG | ImageFormat::PNG | ImageFormat::WEBP, ImageFormat::JPEG) => {
                 // Create the JPEG encoder with the configured quality
                 let mut encoder = JpegEncoder::new_with_quality(writer, quality);
-
                 // Encode the image
                 encoder
                     .encode_image(&img_resized)
                     .map_err(|e| Error::ImageError(e, file_path.clone()))?;
             }
-            ImageFormat::WEBP => {
+
+            (ImageFormat::JPEG | ImageFormat::PNG | ImageFormat::WEBP, ImageFormat::PNG) => {
+                img_resized
+                    .save(resized_file_path.clone())
+                    .map_err(|e| Error::ImageError(e, file_path.clone()))?;
+            }
+
+            (ImageFormat::JPEG | ImageFormat::PNG | ImageFormat::WEBP, ImageFormat::WEBP) => {
                 // Create the WEPB encoder
                 let encoder = webp::Encoder::from_image(&img_resized).map_err(|error| {
                     eprintln!(
@@ -310,6 +375,66 @@ impl Photo {
                     );
                     Error::FileError(error, resized_file_path.clone())
                 })?;
+            }
+
+            (ImageFormat::GIF, _) => {
+                // Read the file header
+                let file =
+                    File::open(file_path).map_err(|e| Error::FileError(e, file_path.clone()))?;
+
+                // Decode a gif into frames
+                let decoder =
+                    GifDecoder::new(file).map_err(|e| Error::ImageError(e, file_path.clone()))?;
+
+                let frames = decoder.into_frames();
+
+                let mut encoder = GifEncoder::new(writer);
+                encoder
+                    .set_repeat(Repeat::Infinite)
+                    .map_err(|e| Error::ImageError(e, file_path.clone()))?;
+
+                let width = max_size as u32;
+                let height = max_size as u32;
+
+                // if true, simply copy original file to target
+                // to prevent up-scaling of GIFs
+                let mut reuse_original = false;
+
+                // Encode frames into a gif and save to a file
+                for frame in frames {
+                    let frame = frame.map_err(|e| Error::ImageError(e, file_path.clone()))?;
+                    let left = frame.left();
+                    let top = frame.top();
+                    let delay = frame.delay();
+                    let image = frame.into_buffer();
+                    if image.width() < width || image.height() < height {
+                        println!(
+                            "GIF is smaller than target size - reusing original: \"{}\"",
+                            file_path.display()
+                        );
+                        reuse_original = true;
+                        break;
+                    }
+
+                    let resized_image =
+                        image::imageops::resize(&image, width, height, FilterType::CatmullRom);
+
+                    encoder
+                        .encode_frame(Frame::from_parts(resized_image, left, top, delay))
+                        .map_err(|e| Error::ImageError(e, file_path.clone()))?;
+                }
+
+                if reuse_original {
+                    std::fs::copy(file_path, resized_file_path.clone())
+                        .map_err(|e| Error::FileError(e, file_path.clone()))?;
+                }
+            }
+
+            (ImageFormat::JPEG | ImageFormat::PNG | ImageFormat::WEBP, ImageFormat::GIF) => {
+                return Err(Error::OtherError(format!(
+                    "Cannot convert {:?} into GIF",
+                    self.image_format()
+                )))
             }
         }
 
@@ -652,7 +777,12 @@ impl Gallery {
 
     fn is_photo_filename(&self, filename: &str) -> bool {
         let filename = filename.to_lowercase();
-        !filename.starts_with('.') && (filename.ends_with(".jpg") || filename.ends_with(".jpeg"))
+        !filename.starts_with('.')
+            && (filename.ends_with(".jpg")
+                || filename.ends_with(".jpeg")
+                || filename.ends_with(".png")
+                || filename.ends_with(".gif")
+                || filename.ends_with(".webp"))
     }
 
     // Private function used to load photos recursively
@@ -789,7 +919,6 @@ impl Gallery {
                 .iter()
                 .map(|photo| &photo.uid)
                 .collect::<Vec<&UID>>();
-            let suffix = ".jpg";
             let mut cache_path = PathBuf::from(&main_config.CACHE_DIR);
             cache_path.push(rel_path);
             match fs::read_dir(&cache_path).await {
@@ -801,6 +930,7 @@ impl Gallery {
                         if let Ok(file_type) = entry.file_type().await {
                             if let Ok(filename) = entry.file_name().into_string() {
                                 let filename_lowercase = filename.to_lowercase();
+                                let suffix = filename_lowercase.split('.').last().unwrap();
                                 for prefix in ["thumbnail_", "large_"] {
                                     // Check if this is a jpeg file with a known prefix
                                     if file_type.is_file()
@@ -1739,6 +1869,7 @@ async fn calculate_file_md5(path: &PathBuf) -> Result<String, Error> {
 
 /// Kinds of resized versions of photos generated in the cache folder
 #[allow(clippy::upper_case_acronyms)]
+#[derive(Copy, Clone)]
 pub enum ResizedType {
     /// Thumbnail-sized photos displayed in the grid
     THUMBNAIL,
@@ -1771,10 +1902,121 @@ impl ResizedType {
 }
 
 /// Available image formats for cache files
-#[derive(Debug, Serialize, Deserialize, Copy, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, Default, Eq, PartialEq)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum ImageFormat {
     JPEG,
+    GIF,
+    PNG,
     #[default]
     WEBP,
+}
+
+impl From<ImageFormat> for &str {
+    fn from(value: ImageFormat) -> Self {
+        match value {
+            ImageFormat::GIF => "gif",
+            ImageFormat::JPEG => "jpeg",
+            ImageFormat::PNG => "png",
+            ImageFormat::WEBP => "webp",
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    mod photo {
+        use crate::photos::{ImageFormat, Photo};
+
+        #[test]
+        fn image_format() {
+            let mut photo: Photo = Photo::default();
+
+            photo.filename = "picture.jpeg".to_string();
+            assert_eq!(photo.image_format(), ImageFormat::JPEG);
+
+            photo.filename = "picture.jpg".to_string();
+            assert_eq!(photo.image_format(), ImageFormat::JPEG);
+
+            photo.filename = "picture.png".to_string();
+            assert_eq!(photo.image_format(), ImageFormat::PNG);
+
+            photo.filename = "picture.gif".to_string();
+            assert_eq!(photo.image_format(), ImageFormat::GIF);
+
+            photo.filename = "picture.webp".to_string();
+            assert_eq!(photo.image_format(), ImageFormat::WEBP);
+        }
+
+        #[test]
+        fn file_extension() {
+            let mut photo: Photo = Photo::default();
+
+            photo.filename = "picture.jpeg".to_string();
+            assert_eq!(photo.file_extension(), "jpeg");
+
+            photo.filename = "picture.jpg".to_string();
+            assert_eq!(photo.file_extension(), "jpeg");
+
+            photo.filename = "picture.png".to_string();
+            assert_eq!(photo.file_extension(), "png");
+
+            photo.filename = "picture.gif".to_string();
+            assert_eq!(photo.file_extension(), "gif");
+
+            photo.filename = "picture.webp".to_string();
+            assert_eq!(photo.file_extension(), "webp");
+        }
+
+        #[test]
+        fn resized_file_extension() {
+            let mut photo: Photo = Photo::default();
+
+            photo.filename = "picture.jpeg".to_string();
+            assert_eq!(photo.resized_file_extension(ImageFormat::JPEG), "jpeg");
+            assert_eq!(photo.resized_file_extension(ImageFormat::PNG), "png");
+            assert_eq!(photo.resized_file_extension(ImageFormat::WEBP), "webp");
+
+            photo.filename = "picture.jpg".to_string();
+            assert_eq!(photo.resized_file_extension(ImageFormat::JPEG), "jpeg");
+            assert_eq!(photo.resized_file_extension(ImageFormat::PNG), "png");
+            assert_eq!(photo.resized_file_extension(ImageFormat::WEBP), "webp");
+
+            photo.filename = "picture.png".to_string();
+            assert_eq!(photo.resized_file_extension(ImageFormat::JPEG), "jpeg");
+            assert_eq!(photo.resized_file_extension(ImageFormat::PNG), "png");
+            assert_eq!(photo.resized_file_extension(ImageFormat::WEBP), "webp");
+
+            photo.filename = "picture.gif".to_string();
+            assert_eq!(photo.resized_file_extension(ImageFormat::JPEG), "gif");
+            assert_eq!(photo.resized_file_extension(ImageFormat::PNG), "gif");
+            assert_eq!(photo.resized_file_extension(ImageFormat::WEBP), "gif");
+
+            photo.filename = "picture.webp".to_string();
+            assert_eq!(photo.resized_file_extension(ImageFormat::JPEG), "jpeg");
+            assert_eq!(photo.resized_file_extension(ImageFormat::PNG), "png");
+            assert_eq!(photo.resized_file_extension(ImageFormat::WEBP), "webp");
+        }
+
+        #[test]
+        fn should_skip_parse_metadata() {
+            let mut photo: Photo = Photo::default();
+
+            photo.filename = "picture.jpeg".to_string();
+            assert_eq!(photo.should_skip_parse_metadata(), false);
+
+            photo.filename = "picture.jpg".to_string();
+            assert_eq!(photo.should_skip_parse_metadata(), false);
+
+            photo.filename = "picture.png".to_string();
+            assert_eq!(photo.should_skip_parse_metadata(), false);
+
+            photo.filename = "picture.gif".to_string();
+            assert_eq!(photo.should_skip_parse_metadata(), true);
+
+            photo.filename = "picture.webp".to_string();
+            assert_eq!(photo.should_skip_parse_metadata(), false);
+        }
+    }
 }

@@ -12,7 +12,7 @@ use config::Config;
 use db::DB;
 use nav_data::NavData;
 use password::OptionalPassword;
-use photos::Gallery;
+use photos::{Gallery, Photo};
 use rocket::fairing::AdHoc;
 use rocket::fs::NamedFile;
 use rocket::http::{CookieJar, Header};
@@ -21,7 +21,7 @@ use rocket::{fs::FileServer, State};
 use rocket_db_pools::{sqlx, Connection, Database};
 use rocket_dyn_templates::{context, Template};
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::{fmt::Display, io};
 use uid::UID;
 
@@ -342,7 +342,7 @@ async fn download_photo(uid: UID, gallery: &State<Gallery>, config: &State<Confi
     match gallery.get_from_uid(&uid).await {
         Some(photo) => {
             // Try to open the file
-            match DownloadedNamedFile::open(&photo.full_path, &photo.uid, config).await {
+            match DownloadedNamedFile::open(&photo, config).await {
                 Ok(file) => PageResult::PhotoDownload(file),
                 Err(error) => {
                     eprintln!(
@@ -405,20 +405,19 @@ pub struct DownloadedNamedFile {
 }
 
 impl DownloadedNamedFile {
-    pub async fn open<P>(path: P, uid: &UID, config: &Config) -> io::Result<Self>
-    where
-        P: AsRef<Path>,
-    {
-        NamedFile::open(path).await.map(|file| Self {
-            inner: file,
-            content_disposition: Header::new(
-                rocket::http::hyper::header::CONTENT_DISPOSITION.as_str(),
-                format!(
-                    "attachment; filename=\"{}{}.jpg\"",
-                    &config.DOWNLOAD_PREFIX, uid
+    pub async fn open(photo: &Photo, config: &Config) -> io::Result<Self> {
+        NamedFile::open(photo.full_path.as_path())
+            .await
+            .map(|file| Self {
+                inner: file,
+                content_disposition: Header::new(
+                    rocket::http::hyper::header::CONTENT_DISPOSITION.as_str(),
+                    format!(
+                        "attachment; filename=\"{}{}\"",
+                        &config.DOWNLOAD_PREFIX, photo.filename
+                    ),
                 ),
-            ),
-        })
+            })
     }
 }
 
