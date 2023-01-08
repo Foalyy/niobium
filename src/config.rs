@@ -1,18 +1,16 @@
-use crate::Error;
 use crate::photos::ImageFormat;
+use crate::Error;
+use rand::RngCore;
+use rocket::serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io;
 use std::io::Write;
-use std::{fs, path::PathBuf};
 use std::path::Path;
-use rand::RngCore;
-use rocket::serde::{Serialize, Deserialize};
+use std::{fs, path::PathBuf};
 use toml::value::Table;
-
 
 /// Name of the main config file in the app's folder
 pub const FILENAME: &'static str = "niobium.config";
-
 
 /// The app's config
 #[allow(non_snake_case)]
@@ -20,17 +18,17 @@ pub const FILENAME: &'static str = "niobium.config";
 pub struct Config {
     /// IP address to serve on. Set to "0.0.0.0" to serve on all interfaces.
     /// Default : 127.0.0.1 (only accessible locally)
-    #[serde(default="config_default_address")]
+    #[serde(default = "config_default_address")]
     pub ADDRESS: String,
 
     /// Port to serve on.
     /// Default : 8000
-    #[serde(default="config_default_port")]
+    #[serde(default = "config_default_port")]
     pub PORT: u16,
 
     /// Title displayed in the page title and the top of the navigation panel.
     /// Default : "Niobium"
-    #[serde(default="config_default_title")]
+    #[serde(default = "config_default_title")]
     pub TITLE: String,
 
     /// Instagram handle to link to in the dedicated button at the upper right,
@@ -42,37 +40,37 @@ pub struct Config {
     /// Path to the photos folder containing the photos to display.
     /// Write access is not required.
     /// Default : "photos" (in the app's folder)
-    #[serde(default="config_default_photos_dir")]
+    #[serde(default = "config_default_photos_dir")]
     pub PHOTOS_DIR: String,
 
     /// Path to the cache folder that will be used by the app to store thumbnails.
     /// Write access is required.
     /// Default : "cache" (in the app's folder)
-    #[serde(default="config_default_cache_dir")]
+    #[serde(default = "config_default_cache_dir")]
     pub CACHE_DIR: String,
 
     /// Path to the SQLite database file used by the app to store the photos index. It will
     /// be automatically created during the first launch, but write access to the containing
     /// folder is required.
     /// Default : "niobium.sqlite" (in the app's folder)
-    #[serde(default="config_default_database_path")]
+    #[serde(default = "config_default_database_path")]
     pub DATABASE_PATH: String,
 
     /// If enabled, the app will index subdirectories recursively in the photos folder.
     /// Default : true
-    #[serde(default="config_default_true")]
+    #[serde(default = "config_default_true")]
     pub INDEX_SUBDIRS: bool,
 
     /// Number of parallel worker tasks that will be spawned when loading new photos into the
     /// database.
     /// Default : 16
-    #[serde(default="config_default_loading_workers")]
+    #[serde(default = "config_default_loading_workers")]
     pub LOADING_WORKERS: usize,
 
     /// If enable, the app will try to read EXIF metadata of photos and save them in the
     /// database.
     /// Default : true
-    #[serde(default="config_default_true")]
+    #[serde(default = "config_default_true")]
     pub READ_EXIF: bool,
 
     /// If enabled, thumbnails will be generated immediately when the photos are loaded into
@@ -94,28 +92,28 @@ pub struct Config {
     /// a classic file browser.
     /// Default : true
     /// This setting is overridable.
-    #[serde(default="config_default_true")]
+    #[serde(default = "config_default_true")]
     pub SHOW_PHOTOS_FROM_SUBDIRS: bool,
 
     /// If enabled, a navigation panel will be displayed when there are subdirectories in the
     /// photos folder. Otherwise, only direct links will allow users to access subdirectories.
     /// Default : true
-    #[serde(default="config_default_true")]
+    #[serde(default = "config_default_true")]
     pub SHOW_NAVIGATION_PANEL: bool,
 
     /// If enabled, the navigation will be open by default when there are subdirectories in
     /// the requested path.
     /// Default : true
-    #[serde(default="config_default_true")]
+    #[serde(default = "config_default_true")]
     pub OPEN_NAVIGATION_PANEL_BY_DEFAULT: bool,
-    
+
     /// Fields(s) to use to sort the photos being displayed. This can be a single field or a
     /// comma-separated list of fields for multi-ordering. Available fields : `id`,
     /// `filename`, `title`, `date_taken`, `sort_order`.
     /// Default : "id" (the order in which they have been added to the database, which
     /// is a natural sort on the filename)
     /// This setting is overridable.
-    #[serde(default="config_default_sort_order")]
+    #[serde(default = "config_default_sort_order")]
     pub SORT_ORDER: String,
 
     /// If enabled, the sort order of the photos will be reversed.
@@ -128,13 +126,13 @@ pub struct Config {
     /// height. For example, `20` will show up to 5 rows at a time. The user can change it
     /// using Zoom+ and Zoom- buttons in the interface.
     /// Default : 23 (show 4 rows with a hint of more at the bottom)
-    #[serde(default="config_default_row_height")]
+    #[serde(default = "config_default_row_height")]
     pub DEFAULT_ROW_HEIGHT: usize,
 
     /// Percentage by which the grid's row height is modified every time the user presses the
     /// Zoom+ / Zoom- buttons.
     /// Default : 10
-    #[serde(default="config_default_row_height_step")]
+    #[serde(default = "config_default_row_height_step")]
     pub ROW_HEIGHT_STEP: usize,
 
     /// In order to display a neat grid with photos of arbitrary ratios, the grid needs to
@@ -143,70 +141,68 @@ pub struct Config {
     /// For example, 1 means no crop is allowed, and 2 means that photos can be cropped to as
     /// much as half of their original height.
     /// Default : 2
-    #[serde(default="config_default_max_zoom")]
+    #[serde(default = "config_default_max_zoom")]
     pub MAX_CROP: usize,
 
     /// If enabled, show a button allowing the user to view metadata of photos (such as camera
     /// model and aperture) in Loupe mode.
     /// Default : true
-    #[serde(default="config_default_true")]
+    #[serde(default = "config_default_true")]
     pub SHOW_METADATA: bool,
 
     /// If enabled, the metadata will be visible by default (but can still be hidden by the
     /// user). Requires `SHOW_METADATA` to be enabled.
     /// Default : true
-    #[serde(default="config_default_true")]
+    #[serde(default = "config_default_true")]
     pub METADATA_VISIBLE_BY_DEFAULT: bool,
 
     /// If enabled, the Loupe view will show a button allowing the user to download the photo
     /// in original quality.
     /// Default : true
-    #[serde(default="config_default_true")]
+    #[serde(default = "config_default_true")]
     pub SHOW_DOWNLOAD_BUTTON: bool,
 
     /// Prefix used for the name of downloaded photos. The UID of the photo will be appended
     /// to it.
     /// Default : "niobium_"
-    #[serde(default="config_default_dowload_prefix")]
+    #[serde(default = "config_default_dowload_prefix")]
     pub DOWNLOAD_PREFIX: String,
 
     /// Delay (in milliseconds) to wait before switching to the next photo in Slideshow mode.
     /// Default : 5000 (5s)
-    #[serde(default="config_default_slideshow_delay")]
+    #[serde(default = "config_default_slideshow_delay")]
     pub SLIDESHOW_DELAY: usize,
 
     /// Max size of thumbnails on any side, in pixels.
     /// Default : 600
-    #[serde(default="config_default_thumbnail_max_size")]
+    #[serde(default = "config_default_thumbnail_max_size")]
     pub THUMBNAIL_MAX_SIZE: usize,
 
     /// Quality used to reencode thumbnails images, in percent.
     /// Default : 75
-    #[serde(default="config_default_thumbnail_quality")]
+    #[serde(default = "config_default_thumbnail_quality")]
     pub THUMBNAIL_QUALITY: usize,
 
     /// Max size of large-size images in Loupe view on any side, in pixels.
     /// Default : 1920
-    #[serde(default="config_default_large_view_max_size")]
+    #[serde(default = "config_default_large_view_max_size")]
     pub LARGE_VIEW_MAX_SIZE: usize,
 
     /// Quality used to reencode large-size images in Loupe view, in percent.
     /// Default : 85
-    #[serde(default="config_default_large_view_quality")]
+    #[serde(default = "config_default_large_view_quality")]
     pub LARGE_VIEW_QUALITY: usize,
 
     /// Image format used for resized photos in cache : JPEG or WEBP.
     /// Default : WEBP
-    #[serde(default="config_default_resized_image_format")]
+    #[serde(default = "config_default_resized_image_format")]
     pub RESIZED_IMAGE_FORMAT: ImageFormat,
 
-
     // Only for subdirs :
-
     /// If disabled, this directory will be ignored and no file inside it will be indexed.
     /// Default : true
     /// This setting is only allowed in subdirectories' config files.
-    #[serde(default="config_default_true")]
+    #[serde(default = "config_default_true")]
     pub INDEX: bool,
 
     /// If enabled, this folder will not be shown in the navigation panel, and a direct link
@@ -218,7 +214,6 @@ pub struct Config {
 }
 
 impl Config {
-
     /// Return a Config struct with default values
     pub fn default() -> Config {
         let empty_value = toml::value::Value::Table(Table::new());
@@ -237,25 +232,33 @@ impl Config {
 
     /// Read the main config file and deserialize it into a Config struct
     pub fn read() -> Result<Self, Error> {
-        Ok(toml::from_str(Self::read_path_as_string(FILENAME)?.as_str())?)
+        Ok(toml::from_str(
+            Self::read_path_as_string(FILENAME)?.as_str(),
+        )?)
     }
 
     /// Try to read and parse the config file
     /// In case of error, print it to stderr and exit with a status code of -1
     pub fn read_or_exit() -> Self {
         // Read the config file and parse it into a Config struct
-        Self::read()
-            .unwrap_or_else(|e| match e {
-                Error::FileError(error, path) => {
-                    eprintln!("Error, unable to open the config file \"{}\" : {}", path.display(), error);
-                    std::process::exit(-1);
-                }
-                Error::TomlParserError(error) => {
-                    eprintln!("Error, unable to parse the config file \"{}\" : {}", FILENAME, error);
-                    std::process::exit(-1);
-                }
-                _ => std::process::exit(-1),
-            })
+        Self::read().unwrap_or_else(|e| match e {
+            Error::FileError(error, path) => {
+                eprintln!(
+                    "Error, unable to open the config file \"{}\" : {}",
+                    path.display(),
+                    error
+                );
+                std::process::exit(-1);
+            }
+            Error::TomlParserError(error) => {
+                eprintln!(
+                    "Error, unable to parse the config file \"{}\" : {}",
+                    FILENAME, error
+                );
+                std::process::exit(-1);
+            }
+            _ => std::process::exit(-1),
+        })
     }
 
     // /// Read the main config file and return it as a TOML Value
@@ -277,22 +280,24 @@ impl Config {
 
     /// Read the config file at the given location and return it as a simple String
     pub fn read_path_as_string<P>(path: P) -> Result<String, Error>
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
-        fs::read_to_string(&path)
-            .map_err(|e| Error::FileError(e, PathBuf::from(path.as_ref())))
+        fs::read_to_string(&path).map_err(|e| Error::FileError(e, PathBuf::from(path.as_ref())))
     }
 
     /// Read the config file at the given location and return it as a TOML Value
     pub fn read_path_as_value<P>(path: P) -> Result<toml::Value, Error>
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         Ok(Self::read_path_as_string(path)?.parse::<toml::Value>()?)
     }
 
     /// Read the config file at the given location and return it as a TOML Table
     pub fn read_path_as_table<P>(path: P) -> Result<Table, Error>
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         Ok(Self::read_path_as_value(path)?.try_into::<Table>()?)
     }
@@ -331,7 +336,11 @@ impl Config {
                 }
                 Err(error) => {
                     // Log the error and continue
-                    eprintln!("Warning: unable to read local config file \"{}\" : {}", subdir_config_path.display(), error);
+                    eprintln!(
+                        "Warning: unable to read local config file \"{}\" : {}",
+                        subdir_config_path.display(),
+                        error
+                    );
                     None
                 }
             }
@@ -339,9 +348,7 @@ impl Config {
             None
         }
     }
-
 }
-
 
 // Default values for config keys
 
@@ -428,23 +435,21 @@ pub fn get_secret_key_or_exit() -> String {
     let path = PathBuf::from(".secret");
     match fs::read_to_string(&path) {
         Ok(secret) => secret.trim().to_string(),
-        
+
         // The secret file doesn't exist, try to generate one
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             print!("Secret file not found, generating a new one... ");
             let mut rand_buffer = [0; 32];
             rand::thread_rng().fill_bytes(&mut rand_buffer);
             let secret = base64::encode(rand_buffer);
-            let mut file = File::create(&path)
-                .unwrap_or_else(|error| {
-                    eprintln!("\nError : unable to create the .secret file : {}", error);
-                    std::process::exit(-1);
-                });
-            writeln!(&mut file, "{}", secret)
-                .unwrap_or_else(|error| {
-                    eprintln!("\nError : unable to write to the .secret file : {}", error);
-                    std::process::exit(-1);
-                });
+            let mut file = File::create(&path).unwrap_or_else(|error| {
+                eprintln!("\nError : unable to create the .secret file : {}", error);
+                std::process::exit(-1);
+            });
+            writeln!(&mut file, "{}", secret).unwrap_or_else(|error| {
+                eprintln!("\nError : unable to write to the .secret file : {}", error);
+                std::process::exit(-1);
+            });
             println!(" done");
             secret
         }

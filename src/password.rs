@@ -1,6 +1,9 @@
-use std::{fmt::Display, collections::HashMap};
+use std::{collections::HashMap, fmt::Display};
 
-use rocket::{request::{FromRequest, self}, http::Status};
+use rocket::{
+    http::Status,
+    request::{self, FromRequest},
+};
 
 pub type Passwords = HashMap<String, String>;
 
@@ -36,11 +39,18 @@ impl<'r> FromRequest<'r> for OptionalPassword {
     type Error = PasswordDecodeError;
 
     async fn from_request(request: &'r rocket::Request<'_>) -> request::Outcome<Self, Self::Error> {
-        match request.headers().get_one(rocket::http::hyper::header::AUTHORIZATION.as_str()).map(|v| v.to_string()) {
+        match request
+            .headers()
+            .get_one(rocket::http::hyper::header::AUTHORIZATION.as_str())
+            .map(|v| v.to_string())
+        {
             Some(header) => match OptionalPassword::from_base64(header) {
                 Ok(password) => request::Outcome::Success(password),
                 Err(error) => {
-                    eprintln!("Warning : a client sent an invalid Authorization header : {}", error);
+                    eprintln!(
+                        "Warning : a client sent an invalid Authorization header : {}",
+                        error
+                    );
                     request::Outcome::Failure((Status::BadGateway, error))
                 }
             },
@@ -77,7 +87,6 @@ impl Display for PasswordDecodeError {
         f.write_str("Invalid header")
     }
 }
-
 
 /// Kinds of error when checking if a password
 pub enum PasswordError {
