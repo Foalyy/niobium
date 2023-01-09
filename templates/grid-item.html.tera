@@ -10,7 +10,9 @@
     data-color="#{{ photo.color }}"
     {% if config.SHOW_METADATA %}
         data-title="{{ photo.title }}"
-        data-filename="{{ photo.filename }}"
+        {% if config.SHOW_FILENAME_IN_METADATA %}
+            data-filename="{{ photo.filename }}"
+        {% endif %}
         data-date="{{ photo.date_taken }}"
         data-place="{{ photo.place }}"
         data-camera="{{ photo.camera_model }}"

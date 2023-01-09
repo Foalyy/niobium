@@ -150,6 +150,11 @@ pub struct Config {
     #[serde(default = "config_default_true")]
     pub SHOW_METADATA: bool,
 
+    /// If enabled, shows the photo's filename inside the metadata section in Loupe mode.
+    /// Default : false
+    #[serde(default = "config_default_false")]
+    pub SHOW_FILENAME_IN_METADATA: bool,
+
     /// If enabled, the metadata will be visible by default (but can still be hidden by the
     /// user). Requires `SHOW_METADATA` to be enabled.
     /// Default : true
@@ -374,6 +379,10 @@ fn config_default_cache_dir() -> String {
 
 fn config_default_true() -> bool {
     true
+}
+
+fn config_default_false() -> bool {
+    false
 }
 
 fn config_default_database_path() -> String {
