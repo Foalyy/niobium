@@ -1,5 +1,5 @@
 use rocket::serde::Serialize;
-use std::path::{Component, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::password::Passwords;
 use crate::photos::Gallery;
@@ -42,7 +42,7 @@ impl Split for PathBuf {
                     "".to_string()
                 }
             })
-            .filter(|c| c != "")
+            .filter(|c| !c.is_empty())
             .collect()
     }
 }
@@ -57,12 +57,13 @@ impl NavData {
     }
 
     /// Generate a full NavaData struct based on the given path and config
+    #[allow(clippy::redundant_clone)]
     pub async fn from_path(
-        path: &PathBuf,
+        path: &Path,
         gallery: &Gallery,
         provided_passwords: Option<Passwords>,
     ) -> Result<Self, Error> {
-        let mut path_current = path.clone();
+        let mut path_current = path.to_path_buf();
         let mut path_parent = path_current.parent().map(|p| p.to_path_buf());
         let path_navigate_up = path_parent.clone().map(|p| p.to_path_buf());
         let mut is_root = path_parent.is_none();
@@ -70,8 +71,8 @@ impl NavData {
         let path_split_open = path_split.clone();
         let mut current = path_split
             .last()
-            .map(|s| s.clone())
-            .unwrap_or("/".to_string());
+            .cloned()
+            .unwrap_or_else(|| "/".to_string());
         let current_open = current.clone();
         let mut subdirs = gallery.get_subdirs(&path_current, None).await;
         let mut open_subdir: Option<String> = None;
@@ -82,33 +83,31 @@ impl NavData {
             open_subdir = path_split.pop().map(|s| s.to_owned());
             current = path_split
                 .last()
-                .map(|s| s.clone())
-                .unwrap_or("/".to_string());
-            path_current = path_parent.unwrap_or_default().to_path_buf();
+                .cloned()
+                .unwrap_or_else(|| "/".to_string());
+            path_current = path_parent.unwrap_or_default();
             path_parent = path_current.parent().map(|p| p.to_path_buf());
             is_root = path_parent.is_none();
             subdirs = gallery
-                .get_subdirs(&path_current, Some(&open_subdir.as_ref().unwrap()))
+                .get_subdirs(&path_current, Some(open_subdir.as_ref().unwrap()))
                 .await;
         };
         let parent = if path_split.len() >= 2 {
             path_split
                 .get(path_split.len() - 2)
-                .map(|s| s.clone())
-                .unwrap_or("/".to_string())
+                .cloned()
+                .unwrap_or_else(|| "/".to_string())
         } else {
             "/".to_string()
         };
-        let path_parent = path_parent
-            .map(|p| p.to_path_buf())
-            .unwrap_or(PathBuf::new());
+        let path_parent = path_parent.map(|p| p.to_path_buf()).unwrap_or_default();
 
         // Generate URIs for every subdirs
         let subdirs_with_urls = subdirs
             .iter()
             .map(|s| {
                 let mut subdir_path = PathBuf::from(&path_current);
-                subdir_path.push(&s);
+                subdir_path.push(s);
                 (
                     s.clone(),
                     uri!(crate::get_gallery(&subdir_path)).to_string(),
@@ -121,7 +120,7 @@ impl NavData {
         let path_split_open_with_urls = path_split_open
             .iter()
             .map(|s| {
-                subdir_path.push(&s);
+                subdir_path.push(s);
                 (
                     s.clone(),
                     uri!(crate::get_gallery(&subdir_path)).to_string(),
@@ -132,7 +131,7 @@ impl NavData {
         // Generate URI for the Navigate Up button
         let url_navigate_up = path_navigate_up
             .map(|p| uri!(crate::get_gallery(PathBuf::from(&p))).to_string())
-            .unwrap_or("".to_string());
+            .unwrap_or_else(|| "".to_string());
 
         // Check which subdirs are locked
         let mut locked_subdirs: Vec<String> = Vec::new();
@@ -145,7 +144,7 @@ impl NavData {
             if passwords.contains_key(&subdir_path_str) {
                 let unlocked = provided_passwords
                     .as_ref()
-                    .and_then(|v| Some(v.contains_key(&subdir_path_str)))
+                    .map(|v| v.contains_key(&subdir_path_str))
                     .unwrap_or(false);
                 if unlocked {
                     unlocked_subdirs.push(subdir.clone());

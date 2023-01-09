@@ -702,7 +702,7 @@ function setLoupePhoto(gridItem) {
                 downloadCurrentPhoto();
             });
             if ($('.loupe-metadata').length > 0) {
-                const properties = ['title', 'date', 'place', 'camera', 'lens', 'focal-length', 'aperture', 'exposure-time', 'sensitivity'];
+                const properties = ['title', 'filename', 'date', 'place', 'camera', 'lens', 'focal-length', 'aperture', 'exposure-time', 'sensitivity'];
                 let showInfoButton = false;
                 let showGear = false;
                 let showSettings = false;

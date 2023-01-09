@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::{config::Config, photos::Photo, uid::UID, Error};
 use rocket::{fairing, tokio::fs, Build, Rocket};
@@ -49,7 +49,7 @@ pub async fn init_schema(rocket: Rocket<Build>) -> fairing::Result {
                         for sql_query in sql_queries {
                             let query_result = sqlx::query(sql_query).execute(db).await;
                             if let Err(error) = query_result {
-                                println!("");
+                                println!();
                                 eprintln!("Error, unable to execute a query from schema.sql :");
                                 eprintln!("{}", sql_query);
                                 eprintln!("Result : {}", error);
@@ -60,7 +60,7 @@ pub async fn init_schema(rocket: Rocket<Build>) -> fairing::Result {
                         Ok(rocket)
                     }
                     Err(error) => {
-                        println!("");
+                        println!();
                         eprintln!("Error, unable to open \"schema.sql\" : {}", error);
                         Err(rocket)
                     }
@@ -83,17 +83,15 @@ pub async fn get_existing_uids(db_conn: &mut PoolConnection<Sqlite>) -> Result<V
     Ok(sqlx::query("SELECT uid FROM photo;")
         .fetch_all(db_conn)
         .await
-        .and_then(|rows| {
-            Ok(
-                // Convert the list of rows into a list of UID's, excluding invalid inputs from the result
-                rows.iter()
-                    .filter_map(|row| -> Option<UID> {
-                        row.try_get(0)
-                            .ok()
-                            .and_then(|col: String| UID::try_from(&col).ok())
-                    })
-                    .collect::<Vec<UID>>(),
-            )
+        .map(|rows| {
+            // Convert the list of rows into a list of UID's, excluding invalid inputs from the result
+            rows.iter()
+                .filter_map(|row| -> Option<UID> {
+                    row.try_get(0)
+                        .ok()
+                        .and_then(|col: String| UID::try_from(&col).ok())
+                })
+                .collect::<Vec<UID>>()
         })?)
 }
 
@@ -102,24 +100,22 @@ pub async fn get_all_paths(db_conn: &mut PoolConnection<Sqlite>) -> Result<Vec<P
     Ok(sqlx::query("SELECT path FROM photo GROUP BY path;")
         .fetch_all(db_conn)
         .await
-        .and_then(|rows| {
-            Ok(
-                // Convert the list of rows into a list of PathBuf's, excluding invalid inputs from the result
-                rows.iter()
-                    .filter_map(|row| -> Option<PathBuf> {
-                        row.try_get(0)
-                            .ok()
-                            .and_then(|col: String| PathBuf::try_from(&col).ok())
-                    })
-                    .collect::<Vec<PathBuf>>(),
-            )
+        .map(|rows| {
+            // Convert the list of rows into a list of PathBuf's, excluding invalid inputs from the result
+            rows.iter()
+                .filter_map(|row| -> Option<PathBuf> {
+                    row.try_get(0)
+                        .ok()
+                        .and_then(|col: String| PathBuf::try_from(&col).ok())
+                })
+                .collect::<Vec<PathBuf>>()
         })?)
 }
 
 /// Get the list of photos known in the database that are registered in one of the given paths
 pub async fn get_photos_in_paths(
     db_conn: &mut PoolConnection<Sqlite>,
-    paths: &Vec<PathBuf>,
+    paths: &[PathBuf],
     config: &Config,
 ) -> Result<Vec<Photo>, Error> {
     let mut photos: Vec<Photo> = Vec::new();
@@ -140,8 +136,8 @@ pub async fn get_photos_in_paths(
 /// Get the list of photos known in the database that are registered in the given path, ordered
 pub async fn get_photos_in_path(
     db_conn: &mut PoolConnection<Sqlite>,
-    path: &PathBuf,
-    sort_columns: &Vec<String>,
+    path: &Path,
+    sort_columns: &[String],
     config: &Config,
 ) -> Result<Vec<Photo>, Error> {
     let mut query_builder = QueryBuilder::new("SELECT * FROM photo WHERE path=");
@@ -150,7 +146,7 @@ pub async fn get_photos_in_path(
     let sort_columns = sort_columns
         .iter()
         .map(|c| c.trim())
-        .filter(|&c| c != "")
+        .filter(|&c| !c.is_empty())
         .collect::<Vec<&str>>();
     if !sort_columns.is_empty() {
         query_builder.push(" ORDER BY ");
@@ -174,37 +170,35 @@ async fn get_photos_from_query<'q>(
     query: Query<'q, Sqlite, SqliteArguments<'q>>,
     config: &Config,
 ) -> Result<Vec<Photo>, Error> {
-    Ok(query.fetch_all(db_conn).await.and_then(|rows| {
-        Ok(
-            // Convert the list of rows into a list of Photo's, excluding invalid inputs from the result
-            rows.iter()
-                .filter_map(|row| -> Option<Photo> {
-                    row_to_photo(row)
-                        .or_else(|e| {
-                            eprintln!(
-                                "Warning : database error : unable to decode a photo : {}",
-                                e
-                            );
-                            Err(e)
-                        })
-                        .and_then(|mut photo| {
-                            let mut full_path = PathBuf::from(&config.PHOTOS_DIR);
-                            full_path.push(&photo.path);
-                            full_path.push(&photo.filename);
-                            photo.full_path = full_path;
-                            Ok(photo)
-                        })
-                        .ok()
-                })
-                .collect::<Vec<Photo>>(),
-        )
+    Ok(query.fetch_all(db_conn).await.map(|rows| {
+        // Convert the list of rows into a list of Photo's, excluding invalid inputs from the result
+        rows.iter()
+            .filter_map(|row| -> Option<Photo> {
+                row_to_photo(row)
+                    .map_err(|e| {
+                        eprintln!(
+                            "Warning : database error : unable to decode a photo : {}",
+                            e
+                        );
+                        e
+                    })
+                    .map(|mut photo| {
+                        let mut full_path = PathBuf::from(&config.PHOTOS_DIR);
+                        full_path.push(&photo.path);
+                        full_path.push(&photo.filename);
+                        photo.full_path = full_path;
+                        photo
+                    })
+                    .ok()
+            })
+            .collect::<Vec<Photo>>()
     })?)
 }
 
 /// Insert a list of photos into the database
 pub async fn insert_photos(
     db_conn: &mut PoolConnection<Sqlite>,
-    photos: &Vec<Photo>,
+    photos: &[Photo],
 ) -> Result<(), Error> {
     // Insert photos by batches of up to 100
     for batch in photos.chunks(100) {
@@ -263,7 +257,7 @@ pub async fn insert_photos(
 /// Remove a list of photos from the database, based on their UIDs
 pub async fn remove_photos(
     db_conn: &mut PoolConnection<Sqlite>,
-    photos: &Vec<Photo>,
+    photos: &[Photo],
 ) -> Result<(), Error> {
     // Remove photos by batches of up to 100
     for batch in photos.chunks(100) {
@@ -302,7 +296,7 @@ fn row_to_photo(row: &SqliteRow) -> Result<Photo, sqlx::Error> {
         id: row.try_get(0)?,
         filename: row.try_get(1)?,
         path: PathBuf::from(row.try_get::<String, _>(2)?),
-        uid: UID::try_from(row.try_get::<&str, _>(3)?).unwrap_or(UID::empty()),
+        uid: UID::try_from(row.try_get::<&str, _>(3)?).unwrap_or_else(|_| UID::empty()),
         md5: row.try_get(4)?,
         sort_order: row.try_get(5)?,
         hidden: row.try_get(6)?,
