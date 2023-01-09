@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::io::{self, Write};
 use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio_stream::wrappers::ReadDirStream;
@@ -58,6 +58,7 @@ pub struct Photo {
 impl Photo {
     /// Try to open the photo file to extract its metadata.
     /// If this has already been done according to the `metadata_parsed` field, this is a no-op.
+    #[allow(clippy::identity_op)]
     pub async fn parse_metadata(&mut self, read_exif: bool) -> Result<(), Error> {
         if self.metadata_parsed {
             // Metadata already parsed, nothing to do
@@ -130,11 +131,12 @@ impl Photo {
     /// Try to parse exif metadata
     pub fn parse_exif(&mut self) -> Result<(), Error> {
         fn remove_quotes(value: String) -> String {
+            #[allow(clippy::redundant_clone)]
             let mut value = value.clone();
-            if value.starts_with("\"") {
+            if value.starts_with('"') {
                 value.remove(0);
             }
-            if value.ends_with("\"") {
+            if value.ends_with('"') {
                 value.pop();
             }
             value
@@ -236,7 +238,7 @@ impl Photo {
 
         // Make sure the directory exists in the cache folder
         let cache_dir = PathBuf::from(&cache_dir);
-        let dir_path = PathBuf::from(resized_file_path.parent().unwrap_or_else(|| &cache_dir));
+        let dir_path = PathBuf::from(resized_file_path.parent().unwrap_or(&cache_dir));
         if !dir_path.is_dir() {
             create_dir_all(&dir_path).await.map_err(|e| {
                 eprintln!(
@@ -248,7 +250,7 @@ impl Photo {
         }
 
         // Load the image
-        let img = image::io::Reader::open(&file_path)
+        let img = image::io::Reader::open(file_path)
             .map_err(|e| Error::FileError(e, file_path.clone()))?
             .decode()
             .map_err(|e| {
@@ -287,29 +289,26 @@ impl Photo {
             }
             ImageFormat::WEBP => {
                 // Create the WEPB encoder
-                let encoder = webp::Encoder::from_image(&img_resized).or_else(|error| {
+                let encoder = webp::Encoder::from_image(&img_resized).map_err(|error| {
                     eprintln!(
                         "Error : failed to create a WEBP encoder for \"{}\" : {}",
                         resized_file_path.display(),
                         error
                     );
-                    Err(Error::WebpEncoderError(
-                        error.to_string(),
-                        resized_file_path.clone(),
-                    ))
+                    Error::WebpEncoderError(error.to_string(), resized_file_path.clone())
                 })?;
 
                 // Encode the image to a memory buffer
                 let data = encoder.encode(quality as f32);
 
                 // Write the buffer to the output file
-                writer.write(&*data).or_else(|error| {
+                writer.write(&data).map_err(|error| {
                     eprintln!(
                         "Error : unable to write to \"{}\" : {}",
                         resized_file_path.display(),
                         error
                     );
-                    Err(Error::FileError(error, resized_file_path.clone()))
+                    Error::FileError(error, resized_file_path.clone())
                 })?;
             }
         }
@@ -329,14 +328,14 @@ impl CachedPhoto {
     fn new(photo: Photo, passwords: Vec<(String, String)>) -> Self {
         Self {
             photo: Arc::new(photo),
-            passwords: passwords,
+            passwords,
         }
     }
 
     fn clone_from(photo: &CachedPhoto, passwords: Vec<(String, String)>) -> Self {
         Self {
             photo: Arc::clone(&photo.photo),
-            passwords: passwords,
+            passwords,
         }
     }
 }
@@ -345,7 +344,7 @@ impl Deref for CachedPhoto {
     type Target = Photo;
 
     fn deref(&self) -> &Self::Target {
-        &self.photo.as_ref()
+        self.photo.as_ref()
     }
 }
 
@@ -416,17 +415,17 @@ impl Gallery {
     }
 
     /// Insert an empty array at the given path if it doesn't already exist in the gallery
-    pub async fn insert_path(&self, path: &PathBuf) {
+    pub async fn insert_path(&self, path: &Path) {
         // If this path is not already in the hashmap, insert an empty vec at this key
         // This is used to make sure that
         let mut gallery_lock = self.gallery.write().await;
         gallery_lock
             .entry(path.to_string_lossy().into_owned())
-            .or_insert_with(|| Vec::new());
+            .or_insert_with(Vec::new);
     }
 
     /// Check if the given path exists in the gallery
-    pub async fn path_exists(&self, path: &PathBuf) -> bool {
+    pub async fn path_exists(&self, path: &Path) -> bool {
         self.gallery
             .read()
             .await
@@ -435,7 +434,7 @@ impl Gallery {
 
     /// Insert the given photo in the gallery at the given path. If this photo is already registered in the gallery for a given path,
     /// it will not get duplicated, instead the smart pointer that will be inserted will point to the same Photo internally
-    async fn insert_photo(&self, path: &PathBuf, photo: &Photo, passwords: Vec<(String, String)>) {
+    async fn insert_photo(&self, path: &Path, photo: &Photo, passwords: Vec<(String, String)>) {
         // If this photo has already been inserted somewhere in the gallery, it also has an Arc pointer stored in the `photos`
         // hashmap that we can retreive efficiently; otherwise, create a new Arc and insert it into the hashmap
         let mut photos_lock = self.photos.write().await;
@@ -451,7 +450,7 @@ impl Gallery {
         let mut gallery_lock = self.gallery.write().await;
         let vec = gallery_lock
             .entry(path.to_string_lossy().into_owned())
-            .or_insert_with(|| Vec::new());
+            .or_insert_with(Vec::new);
 
         // Add this Arc pointer to the list of photos for this path in the gallery if it hasn't already been inserted
         if !vec.iter().any(|cp| cp.photo.uid == photo.uid) {
@@ -462,7 +461,7 @@ impl Gallery {
     /// Acquire a read lock on the gallery if the path exists, or return None otherwise
     pub async fn read<'a>(
         &'a self,
-        path: &'a PathBuf,
+        path: &'a Path,
         start: Option<usize>,
         count: Option<usize>,
         uid: Option<UID>,
@@ -542,7 +541,7 @@ impl Gallery {
     /// or if access is granted, or Err with the kind of error if the password is invalid.
     pub async fn check_password(
         &self,
-        path: &PathBuf,
+        path: &Path,
         cookies: &CookieJar<'_>,
         request_password: &OptionalPassword,
     ) -> Result<Passwords, PasswordError> {
@@ -553,7 +552,7 @@ impl Gallery {
         let mut user_passwords = Passwords::new();
         for (gallery_path, required_password) in gallery_passwords.deref() {
             if let Some(provided_password) = cookies
-                .get_private(&password::cookie_name(&gallery_path))
+                .get_private(&password::cookie_name(gallery_path))
                 .map(|c| c.value().to_string())
             {
                 if &provided_password == required_password {
@@ -564,7 +563,7 @@ impl Gallery {
 
         // Compute the list of required passwords to access this path
         let mut required_passwords = Passwords::new();
-        let mut path_current = path.clone();
+        let mut path_current = path.to_path_buf();
         let empty_path = PathBuf::new();
         while path_current != empty_path {
             let path_current_str = path_current.to_string_lossy().to_string();
@@ -581,7 +580,7 @@ impl Gallery {
 
         if required_passwords.is_empty() {
             // No password required
-            return Ok(user_passwords);
+            Ok(user_passwords)
         } else {
             // At least one password is required, check all of them in order
             for required_password_path in paths_requiring_passwords {
@@ -616,7 +615,7 @@ impl Gallery {
                         // It doesn't match : return "invalid password"
                         return Err(PasswordError::Invalid(required_password_path.clone()));
                     }
-                } else if let Some(_) = request_password.as_string() {
+                } else if request_password.as_string().is_some() {
                     // An invalid password was provided in the current request : return "invalid password"
                     return Err(PasswordError::Invalid(required_password_path.clone()));
                 } else {
@@ -626,7 +625,7 @@ impl Gallery {
             }
 
             // All passwords have been provided
-            return Ok(user_passwords);
+            Ok(user_passwords)
         }
     }
 
@@ -652,6 +651,7 @@ impl Gallery {
     }
 
     // Private function used to load photos recursively
+    #[allow(clippy::too_many_arguments)]
     fn load_rec<'a>(
         &'a self,
         full_path: &'a PathBuf,
@@ -671,7 +671,7 @@ impl Gallery {
             if let Some(paths_found) = paths_found {
                 paths_found.push(rel_path.clone());
             }
-            self.insert_path(&rel_path).await;
+            self.insert_path(rel_path).await;
 
             // Try to find a config file in this directory, append it to a copy of the current one (so it won't propagate to
             // sibling directories), and put it on the stack
@@ -680,7 +680,7 @@ impl Gallery {
             if rel_path != &PathBuf::new() {
                 cfg.remove("PASSWORD");
             }
-            Config::update_with_subdir(&full_path, &mut cfg);
+            Config::update_with_subdir(full_path, &mut cfg);
             configs_stack.push((rel_path.clone(), cfg));
             let subdir_config = &configs_stack.last().unwrap().1;
             match Config::from_table(subdir_config.clone()) {
@@ -708,7 +708,7 @@ impl Gallery {
                 }
                 None => "".to_string(),
             };
-            if password.len() > 0 {
+            if !password.is_empty() {
                 self.passwords
                     .write()
                     .await
@@ -728,7 +728,7 @@ impl Gallery {
                         if let Ok(filename) = entry.file_name().into_string() {
                             let filename_lowercase = filename.to_lowercase();
                             if file_type.is_file()
-                                && !filename_lowercase.starts_with(".")
+                                && !filename_lowercase.starts_with('.')
                                 && (filename_lowercase.ends_with(".jpg")
                                     || filename_lowercase.ends_with(".jpeg"))
                             {
@@ -747,11 +747,11 @@ impl Gallery {
                     .and_then(|v| v.as_str())
                     .unwrap_or(&default_config.SORT_ORDER),
             )
-            .split(",")
+            .split(',')
             .map(|s| String::from(s.trim()))
             .collect::<Vec<String>>();
             let photos_in_db =
-                db::get_photos_in_path(db_conn, &rel_path, &sort_columns, main_config).await?;
+                db::get_photos_in_path(db_conn, rel_path, &sort_columns, main_config).await?;
 
             // Find photos in the filesystem that are not in the database yet
             if let Some(ref mut photos_to_insert) = photos_to_insert {
@@ -762,8 +762,8 @@ impl Gallery {
                 for filename in &filenames_in_fs {
                     if !filenames_in_db.contains(&filename) {
                         let mut full_path = PathBuf::from(&main_config.PHOTOS_DIR);
-                        full_path.push(&rel_path);
-                        full_path.push(&filename);
+                        full_path.push(rel_path);
+                        full_path.push(filename);
                         photos_to_insert.push(Photo {
                             path: rel_path.clone(),
                             filename: filename.clone(),
@@ -905,18 +905,18 @@ impl Gallery {
             // If the INDEX_SUBDIRS config is enabled, recursively load photos from subdirectories
             if main_config.INDEX_SUBDIRS {
                 // Find the list of valid subdirectories in the path, in the filesystem
-                let subdirs = list_subdirs(&rel_path, main_config).await?;
+                let subdirs = list_subdirs(rel_path, main_config).await?;
                 let subdirs_names = subdirs.list_names();
 
                 // Clean obsolete subdirectories (that do not correspond to a subdirectory in the photos folder) from the cache folder
-                let subdirs_in_cache = list_subdirs_in_cache(&rel_path, main_config).await?;
+                let subdirs_in_cache = list_subdirs_in_cache(rel_path, main_config).await?;
                 if !subdirs_in_cache.is_empty() {
                     let mut subdirs_in_cache_to_remove: Vec<PathBuf> = Vec::new();
                     for subdir in subdirs_in_cache {
                         if !subdirs_names.contains(&&subdir) {
                             let mut subdir_path = PathBuf::from(&main_config.CACHE_DIR);
-                            subdir_path.push(&rel_path);
-                            subdir_path.push(&subdir);
+                            subdir_path.push(rel_path);
+                            subdir_path.push(subdir);
                             subdirs_in_cache_to_remove.push(subdir_path);
                         }
                     }
@@ -953,16 +953,16 @@ impl Gallery {
                 if !subdirs.is_empty() {
                     for subdir in subdirs.list_names() {
                         let mut subdir_rel_path = rel_path.clone();
-                        subdir_rel_path.push(&subdir);
+                        subdir_rel_path.push(subdir);
                         let mut subdir_full_path = full_path.clone();
-                        subdir_full_path.push(&subdir);
+                        subdir_full_path.push(subdir);
                         self.load_rec(
                             &subdir_full_path,
                             &subdir_rel_path,
                             db_conn,
                             main_config,
                             configs_stack,
-                            &default_config,
+                            default_config,
                             photos_to_insert,
                             photos_to_remove,
                             paths_found,
@@ -987,18 +987,18 @@ impl Gallery {
     ) -> Result<(), Error> {
         // Make sure the main directories (photos and cache) exist, and if not, try to create them
         check_config_dir(&PathBuf::from(&config.PHOTOS_DIR)).await
-            .or_else(|e| {
+            .map_err(|e| {
                 if let Error::FileError(error, path) = &e {
-                    println!("There is an issue with the PHOTOS_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error.to_string());
+                    println!("There is an issue with the PHOTOS_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error);
                 }
-                Err(e)
+                e
             })?;
         check_config_dir(&PathBuf::from(&config.CACHE_DIR)).await
-            .or_else(|error| {
+            .map_err(|error| {
                 if let Error::FileError(error, path) = &error {
-                    eprintln!("There is an issue with the CACHE_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error.to_string());
+                    eprintln!("There is an issue with the CACHE_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error);
                 }
-                Err(error)
+                error
             })?;
 
         // Keep these paths on hand
@@ -1025,7 +1025,7 @@ impl Gallery {
             &full_path,
             &rel_path,
             db_conn,
-            &config,
+            config,
             &mut configs_stack,
             &default_config,
             &mut Some(&mut photos_to_insert),
@@ -1046,7 +1046,7 @@ impl Gallery {
             }
             if !deleted_paths.is_empty() {
                 let photos_in_deleted_paths =
-                    db::get_photos_in_paths(db_conn, &deleted_paths, &config).await?;
+                    db::get_photos_in_paths(db_conn, &deleted_paths, config).await?;
                 for photo in photos_in_deleted_paths {
                     photos_to_remove.push(photo);
                 }
@@ -1064,8 +1064,12 @@ impl Gallery {
             while results.len() < n {
                 // Create up to LOADING_WORKERS background tasks
                 let batch_size = min(n - offset, config.LOADING_WORKERS);
-                for idx in offset..offset + batch_size {
-                    let photo = &photos_to_insert[idx];
+                for (idx, photo) in photos_to_insert
+                    .iter()
+                    .enumerate()
+                    .skip(offset)
+                    .take(batch_size)
+                {
                     let full_path = photo.full_path.clone();
                     tasks.spawn(async move {
                         let full_path = full_path;
@@ -1160,14 +1164,14 @@ impl Gallery {
                         photo
                             .parse_metadata(true)
                             .await
-                            .or_else(|e| {
+                            .map_err(|e| {
                                 eprintln!(
                                     "Error : unable to open \"{}/{}\" : {}",
                                     photo.path.to_string_lossy(),
                                     photo.filename,
                                     e
                                 );
-                                Err(e)
+                                e
                             })
                             .ok(); // Ignore error after printing it
 
@@ -1272,7 +1276,7 @@ impl Gallery {
                 &full_path,
                 &rel_path,
                 db_conn,
-                &config,
+                config,
                 &mut configs_stack,
                 &default_config,
                 &mut None,
@@ -1356,11 +1360,7 @@ impl Gallery {
     }
 
     // Return the list of known non-hidden subdirectories for the given path
-    pub async fn get_subdirs(
-        &self,
-        path: &PathBuf,
-        always_include: Option<&String>,
-    ) -> Vec<String> {
+    pub async fn get_subdirs(&self, path: &Path, always_include: Option<&String>) -> Vec<String> {
         let subdirs_lock = self.subdirs.read().await;
         if let Some(subdirs) = subdirs_lock.get(&path.to_string_lossy().to_string()) {
             let mut subdirs = subdirs.list_visible();
@@ -1488,7 +1488,7 @@ pub async fn init(rocket: Rocket<rocket::Build>) -> fairing::Result {
 
                 println!("Loading photos...");
                 let now = Instant::now();
-                match gallery.load(&config, &mut db_conn).await {
+                match gallery.load(config, &mut db_conn).await {
                     Ok(_) => {
                         println!(
                             "Loaded {} photos successfully in {}ms",
@@ -1606,7 +1606,7 @@ impl Subdirs {
             .subdirs
             .iter()
             .filter(|s| !s.hidden)
-            .map(|s| s.clone())
+            .cloned()
             .collect::<Vec<Subdir>>();
         Self { subdirs }
     }
@@ -1668,7 +1668,7 @@ async fn list_subdirs(path: &PathBuf, config: &Config) -> Result<Subdirs, Error>
         let entry = entry.map_err(|e| Error::FileError(e, full_path.clone()))?;
         if let Ok(file_type) = entry.file_type().await {
             if let Ok(dir_name) = entry.file_name().into_string() {
-                if file_type.is_dir() && !dir_name.starts_with(".") {
+                if file_type.is_dir() && !dir_name.starts_with('.') {
                     // This is a valid subdirectory, check if it contains a config that would forbid including it in the results
                     let mut subdir_path = full_path.clone();
                     subdir_path.push(&dir_name);
@@ -1718,7 +1718,7 @@ async fn list_subdirs_in_cache(path: &PathBuf, config: &Config) -> Result<Vec<St
         let entry = entry.map_err(|e| Error::FileError(e, full_path.clone()))?;
         if let Ok(file_type) = entry.file_type().await {
             if let Ok(dir_name) = entry.file_name().into_string() {
-                if file_type.is_dir() && !dir_name.starts_with(".") {
+                if file_type.is_dir() && !dir_name.starts_with('.') {
                     subdirs.push(dir_name);
                 }
             }
@@ -1738,6 +1738,7 @@ async fn calculate_file_md5(path: &PathBuf) -> Result<String, Error> {
 }
 
 /// Kinds of resized versions of photos generated in the cache folder
+#[allow(clippy::upper_case_acronyms)]
 pub enum ResizedType {
     /// Thumbnail-sized photos displayed in the grid
     THUMBNAIL,
@@ -1771,6 +1772,7 @@ impl ResizedType {
 
 /// Available image formats for cache files
 #[derive(Debug, Serialize, Deserialize, Copy, Clone, Default)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum ImageFormat {
     JPEG,
     #[default]

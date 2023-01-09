@@ -8,6 +8,7 @@ use rocket::request::FromParam;
 use rocket::serde::Serialize;
 
 #[derive(Default, Serialize, Clone, Debug, PartialEq, Eq, Hash)]
+#[allow(clippy::upper_case_acronyms)]
 pub struct UID {
     uid: String,
 }
@@ -59,11 +60,11 @@ impl UID {
     pub const CHARS: &str = "0123456789abcdefghijklmnopqrstuvwxyz";
 
     /// Generate an UID of the given length that doesn't already exist in the given list
-    pub fn new(existing_uids: &Vec<Self>) -> Self {
+    pub fn new(existing_uids: &[Self]) -> Self {
         let mut rng = thread_rng();
         loop {
             let uid_string = Self::CHARS_BIASED
-                .choose_multiple_weighted(&mut rng, Self::LENGTH as usize, |item| item.1)
+                .choose_multiple_weighted(&mut rng, Self::LENGTH, |item| item.1)
                 .expect("Error : invalid weight value for choose_multiple_weighted()")
                 .map(|item| String::from(item.0))
                 .collect::<Vec<String>>()
@@ -128,9 +129,9 @@ impl<'r> FromParam<'r> for UID {
         let mut s = param;
         if &s[0..=0] == "." {
             s = &s[1..];
-            Self::try_from(s).or_else(|_| return Err(param))
+            Self::try_from(s).map_err(|_| param)
         } else {
-            return Err(param);
+            Err(param)
         }
     }
 }

@@ -99,14 +99,14 @@ impl PasswordError {
         match self {
             PasswordError::Required(path) => {
                 if path.is_empty() {
-                    format!("A password is required to access this gallery")
+                    "A password is required to access this gallery".to_string()
                 } else {
                     format!("A password is required to access \"{}\"", path)
                 }
             }
             PasswordError::Invalid(path) => {
                 if path.is_empty() {
-                    format!("Invalid password")
+                    "Invalid password".to_string()
                 } else {
                     format!("Invalid password for \"{}\"", path)
                 }
