@@ -10,7 +10,7 @@ use std::{fs, path::PathBuf};
 use toml::value::Table;
 
 /// Name of the main config file in the app's folder
-pub const FILENAME: &'static str = "niobium.config";
+pub const FILENAME: &str = "niobium.config";
 
 /// The app's config
 #[allow(non_snake_case)]
