@@ -1,12 +1,11 @@
+use crate::Error;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use rocket::http::{impl_from_uri_param_identity, RawStr};
+use rocket::form::{self, DataField, FromFormField, ValueField};
 use rocket::http::uri::fmt::UriDisplay;
-use rocket::form::{self, FromFormField, DataField, ValueField};
+use rocket::http::{impl_from_uri_param_identity, RawStr};
 use rocket::request::FromParam;
 use rocket::serde::Serialize;
-use crate::Error;
-
 
 #[derive(Default, Serialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct UID {
@@ -18,9 +17,42 @@ impl UID {
 
     // List of chars used when building an UID (biased)
     pub const CHARS_BIASED: [(char, u32); 36] = [
-        ('0', 4), ('1', 4), ('2', 4), ('3', 4), ('4', 4), ('5', 4), ('6', 4), ('7', 4), ('8', 4), ('9', 4),
-        ('a', 1), ('b', 1), ('c', 1), ('d', 1), ('e', 1), ('f', 1), ('g', 1), ('h', 1), ('i', 1), ('j', 1), ('k', 1), ('l', 1), ('m', 1),
-        ('n', 1), ('o', 1), ('p', 1), ('q', 1), ('r', 1), ('s', 1), ('t', 1), ('u', 1), ('v', 1), ('w', 1), ('x', 1), ('y', 1), ('z', 1)
+        ('0', 4),
+        ('1', 4),
+        ('2', 4),
+        ('3', 4),
+        ('4', 4),
+        ('5', 4),
+        ('6', 4),
+        ('7', 4),
+        ('8', 4),
+        ('9', 4),
+        ('a', 1),
+        ('b', 1),
+        ('c', 1),
+        ('d', 1),
+        ('e', 1),
+        ('f', 1),
+        ('g', 1),
+        ('h', 1),
+        ('i', 1),
+        ('j', 1),
+        ('k', 1),
+        ('l', 1),
+        ('m', 1),
+        ('n', 1),
+        ('o', 1),
+        ('p', 1),
+        ('q', 1),
+        ('r', 1),
+        ('s', 1),
+        ('t', 1),
+        ('u', 1),
+        ('v', 1),
+        ('w', 1),
+        ('x', 1),
+        ('y', 1),
+        ('z', 1),
     ];
 
     // List of chars used when building an UID (set)
@@ -30,13 +62,13 @@ impl UID {
     pub fn new(existing_uids: &Vec<Self>) -> Self {
         let mut rng = thread_rng();
         loop {
-            let uid_string = Self::CHARS_BIASED.choose_multiple_weighted(&mut rng, Self::LENGTH as usize, |item| item.1)
+            let uid_string = Self::CHARS_BIASED
+                .choose_multiple_weighted(&mut rng, Self::LENGTH as usize, |item| item.1)
                 .expect("Error : invalid weight value for choose_multiple_weighted()")
                 .map(|item| String::from(item.0))
                 .collect::<Vec<String>>()
                 .join("");
-            let uid = Self::try_from(&uid_string)
-                .expect("Error : invalid UID generated");
+            let uid = Self::try_from(&uid_string).expect("Error : invalid UID generated");
             if !existing_uids.contains(&uid) {
                 break uid;
             }
@@ -98,7 +130,7 @@ impl<'r> FromParam<'r> for UID {
             s = &s[1..];
             Self::try_from(s).or_else(|_| return Err(param))
         } else {
-            return Err(param)
+            return Err(param);
         }
     }
 }
@@ -116,7 +148,10 @@ impl<'r> FromFormField<'r> for UID {
 
 /// Format a UID to be used a part of a URI's path
 impl UriDisplay<rocket::http::uri::fmt::Path> for UID {
-    fn fmt(&self, f: &mut rocket::http::uri::fmt::Formatter<'_, rocket::http::uri::fmt::Path>) -> std::fmt::Result {
+    fn fmt(
+        &self,
+        f: &mut rocket::http::uri::fmt::Formatter<'_, rocket::http::uri::fmt::Path>,
+    ) -> std::fmt::Result {
         f.write_raw(".")?;
         f.write_raw(RawStr::new(&self.uid).percent_encode().as_str())?;
         Ok(())
@@ -125,7 +160,10 @@ impl UriDisplay<rocket::http::uri::fmt::Path> for UID {
 
 /// Format a UID to be used a part of a URI's query parameters
 impl UriDisplay<rocket::http::uri::fmt::Query> for UID {
-    fn fmt(&self, f: &mut rocket::http::uri::fmt::Formatter<'_, rocket::http::uri::fmt::Query>) -> std::fmt::Result {
+    fn fmt(
+        &self,
+        f: &mut rocket::http::uri::fmt::Formatter<'_, rocket::http::uri::fmt::Query>,
+    ) -> std::fmt::Result {
         f.write_raw(RawStr::new(&self.uid).percent_encode().as_str())?;
         Ok(())
     }

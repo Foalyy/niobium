@@ -1,7 +1,23 @@
 use crate::config::Config;
-use crate::password::{Passwords, OptionalPassword, PasswordError, self};
+use crate::password::{self, OptionalPassword, PasswordError, Passwords};
 use crate::uid::UID;
-use crate::{Error, db};
+use crate::{db, Error};
+use image::codecs::jpeg::JpegEncoder;
+use image::imageops::FilterType;
+use md5::{Digest, Md5};
+use rocket::futures::StreamExt;
+use rocket::http::{Cookie, CookieJar};
+use rocket::serde::Serialize;
+use rocket::tokio::fs;
+use rocket::tokio::fs::create_dir_all;
+use rocket::tokio::sync::{RwLock, RwLockReadGuard};
+use rocket::tokio::task::JoinSet;
+use rocket::tokio::time::Instant;
+use rocket::{fairing, tokio, Rocket};
+use rocket_db_pools::sqlx::pool::PoolConnection;
+use rocket_db_pools::sqlx::Sqlite;
+use rocket_db_pools::Database;
+use serde::Deserialize;
 use std::cmp::min;
 use std::collections::HashMap;
 use std::future::Future;
@@ -10,25 +26,8 @@ use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use image::codecs::jpeg::JpegEncoder;
-use image::imageops::FilterType;
-use md5::{Md5, Digest};
-use rocket::http::{CookieJar, Cookie};
-use rocket::tokio::sync::{RwLock, RwLockReadGuard};
-use rocket::tokio::task::JoinSet;
-use rocket::{Rocket, fairing, tokio};
-use rocket::serde::Serialize;
-use rocket::tokio::fs::create_dir_all;
-use rocket::tokio::time::Instant;
-use rocket::tokio::fs;
-use rocket::futures::StreamExt;
-use rocket_db_pools::Database;
-use rocket_db_pools::sqlx::Sqlite;
-use rocket_db_pools::sqlx::pool::PoolConnection;
-use serde::Deserialize;
 use tokio_stream::wrappers::ReadDirStream;
 use toml::value::Table;
-
 
 /// Main struct representing a photo and its metadata
 #[derive(Default, Serialize, Clone, Debug)]
@@ -80,7 +79,11 @@ impl Photo {
         let img_rgb8 = match img {
             image::DynamicImage::ImageRgb8(pixels) => pixels,
             _ => {
-                eprintln!("Warning : converting \"{}\" from {:?} to RGB8, this is not efficient", self.full_path.display(), img.color());
+                eprintln!(
+                    "Warning : converting \"{}\" from {:?} to RGB8, this is not efficient",
+                    self.full_path.display(),
+                    img.color()
+                );
                 img.into_rgb8()
             }
         };
@@ -99,14 +102,23 @@ impl Photo {
         average_g /= n_pixels as u64;
         average_b /= n_pixels as u64;
         let darken_factor = 6;
-        self.color = format!("{:02x}{:02x}{:02x}", average_r / darken_factor, average_g / darken_factor, average_b / darken_factor);
+        self.color = format!(
+            "{:02x}{:02x}{:02x}",
+            average_r / darken_factor,
+            average_g / darken_factor,
+            average_b / darken_factor
+        );
 
         // Parse EXIF metadata
         if read_exif {
             if let Err(Error::EXIFParserError(error, _)) = self.parse_exif() {
                 match error {
                     exif::Error::NotFound(_) => (), // Ignore
-                    _ => eprintln!("Warning : unable to parse EXIF data from \"{}\" : {}", &self.full_path.display(), error),
+                    _ => eprintln!(
+                        "Warning : unable to parse EXIF data from \"{}\" : {}",
+                        &self.full_path.display(),
+                        error
+                    ),
                 }
             }
         }
@@ -133,9 +145,10 @@ impl Photo {
             .map_err(|e| Error::FileError(e, self.full_path.clone()))?;
         let mut buf_reader = std::io::BufReader::new(&exif_file);
         let exif_reader = exif::Reader::new();
-        let exif = exif_reader.read_from_container(&mut buf_reader)
+        let exif = exif_reader
+            .read_from_container(&mut buf_reader)
             .map_err(|e| Error::EXIFParserError(e, self.full_path.clone()))?;
-        
+
         // Add every relevant available fields to the photo object
         if let Some(field) = exif.get_field(exif::Tag::DateTimeDigitized, exif::In::PRIMARY) {
             self.date_taken = remove_quotes(format!("{}", field.display_value()));
@@ -166,13 +179,32 @@ impl Photo {
     }
 
     /// Create a resized version of this photo in the cache folder
-    async fn create_resized(&self, resized_type: ResizedType, image_format: ImageFormat, config: &Config) -> Result<PathBuf, Error> {
+    async fn create_resized(
+        &self,
+        resized_type: ResizedType,
+        image_format: ImageFormat,
+        config: &Config,
+    ) -> Result<PathBuf, Error> {
         let max_size = resized_type.max_size(config);
         let quality = resized_type.quality(config);
-        self.create_resized_from_params(resized_type, image_format, config.CACHE_DIR.clone(), max_size, quality).await
+        self.create_resized_from_params(
+            resized_type,
+            image_format,
+            config.CACHE_DIR.clone(),
+            max_size,
+            quality,
+        )
+        .await
     }
 
-    async fn create_resized_from_params(&self, resized_type: ResizedType, image_format: ImageFormat, cache_dir: String, max_size: usize, quality: usize) -> Result<PathBuf, Error> {
+    async fn create_resized_from_params(
+        &self,
+        resized_type: ResizedType,
+        image_format: ImageFormat,
+        cache_dir: String,
+        max_size: usize,
+        quality: usize,
+    ) -> Result<PathBuf, Error> {
         // Extention according to the configured image format
         let file_extension = match image_format {
             ImageFormat::JPEG => "jpg",
@@ -182,7 +214,12 @@ impl Photo {
         // Path of the resized version of this photo in the cache folder
         let mut resized_file_path = PathBuf::from(&cache_dir);
         resized_file_path.push(&self.path);
-        resized_file_path.push(format!("{}_{}.{}", resized_type.prefix(), &self.uid, file_extension));
+        resized_file_path.push(format!(
+            "{}_{}.{}",
+            resized_type.prefix(),
+            &self.uid,
+            file_extension
+        ));
 
         // Check if the file already exists
         if resized_file_path.exists() {
@@ -196,27 +233,33 @@ impl Photo {
             max_size, max_size, quality,
             file_path.display()
         );
-    
+
         // Make sure the directory exists in the cache folder
         let cache_dir = PathBuf::from(&cache_dir);
         let dir_path = PathBuf::from(resized_file_path.parent().unwrap_or_else(|| &cache_dir));
         if !dir_path.is_dir() {
-            create_dir_all(&dir_path).await
-                .map_err(|e| {
-                    eprintln!("Error : unable to create a directory in the cache folder : {}", dir_path.display());
-                    Error::FileError(e, dir_path.clone())
-                })?;
+            create_dir_all(&dir_path).await.map_err(|e| {
+                eprintln!(
+                    "Error : unable to create a directory in the cache folder : {}",
+                    dir_path.display()
+                );
+                Error::FileError(e, dir_path.clone())
+            })?;
         }
-    
+
         // Load the image
         let img = image::io::Reader::open(&file_path)
             .map_err(|e| Error::FileError(e, file_path.clone()))?
             .decode()
             .map_err(|e| {
-                eprintln!("Error : unable to decode photo at \"{}\" : {}", file_path.display(), e);
+                eprintln!(
+                    "Error : unable to decode photo at \"{}\" : {}",
+                    file_path.display(),
+                    e
+                );
                 Error::ImageError(e, file_path.clone())
             })?;
-        
+
         // Resize this image
         let img_resized = img.resize(max_size as u32, max_size as u32, FilterType::CatmullRom);
 
@@ -225,7 +268,7 @@ impl Photo {
             eprintln!("Warning : invalid 'quality' value for image encoder (must be between 10 and 100), falling back to 80");
             80
         });
-    
+
         // Create an encoder and write the image to the output file.
         // Note that this uses the standard fs API, as opposed to tokio's async API, because the encoder is not compatible
         // with the async equivalent of Writer.
@@ -236,16 +279,24 @@ impl Photo {
             ImageFormat::JPEG => {
                 // Create the JPEG encoder with the configured quality
                 let mut encoder = JpegEncoder::new_with_quality(writer, quality);
-        
+
                 // Encode the image
-                encoder.encode_image(&img_resized)
+                encoder
+                    .encode_image(&img_resized)
                     .map_err(|e| Error::ImageError(e, file_path.clone()))?;
             }
             ImageFormat::WEBP => {
                 // Create the WEPB encoder
                 let encoder = webp::Encoder::from_image(&img_resized).or_else(|error| {
-                    eprintln!("Error : failed to create a WEBP encoder for \"{}\" : {}", resized_file_path.display(), error);
-                    Err(Error::WebpEncoderError(error.to_string(), resized_file_path.clone()))
+                    eprintln!(
+                        "Error : failed to create a WEBP encoder for \"{}\" : {}",
+                        resized_file_path.display(),
+                        error
+                    );
+                    Err(Error::WebpEncoderError(
+                        error.to_string(),
+                        resized_file_path.clone(),
+                    ))
                 })?;
 
                 // Encode the image to a memory buffer
@@ -253,16 +304,19 @@ impl Photo {
 
                 // Write the buffer to the output file
                 writer.write(&*data).or_else(|error| {
-                    eprintln!("Error : unable to write to \"{}\" : {}", resized_file_path.display(), error);
+                    eprintln!(
+                        "Error : unable to write to \"{}\" : {}",
+                        resized_file_path.display(),
+                        error
+                    );
                     Err(Error::FileError(error, resized_file_path.clone()))
                 })?;
             }
         }
-        
+
         Ok(resized_file_path)
     }
 }
-
 
 /// A photo stored in cache with extra metadata
 #[derive(Debug)]
@@ -295,7 +349,6 @@ impl Deref for CachedPhoto {
     }
 }
 
-
 pub type GalleryContent = HashMap<String, Vec<CachedPhoto>>;
 
 /// Thread-safe struct that holds a list of photos and allows them to be accessed efficiently once loaded
@@ -310,7 +363,6 @@ pub struct Gallery {
 }
 
 impl Gallery {
-
     /// Create a new, empty gallery
     pub fn new() -> Gallery {
         Self {
@@ -323,12 +375,10 @@ impl Gallery {
         }
     }
 
-
     /// Total number of photos in the gallery
     pub async fn len(&self) -> usize {
         self.photos.read().await.len()
     }
-
 
     /// Remove every photo from the gallery
     pub async fn clear(&self) {
@@ -340,15 +390,22 @@ impl Gallery {
         passwords_lock.clear();
     }
 
-
     /// Reload the gallery. This will `clear()` then `load()`.
-    pub async fn reload(&self, config: &Config, db_conn: &mut PoolConnection<Sqlite>) -> Result<(), Error> {
+    pub async fn reload(
+        &self,
+        config: &Config,
+        db_conn: &mut PoolConnection<Sqlite>,
+    ) -> Result<(), Error> {
         self.clear().await;
         println!("Reloading photos...");
         let now = Instant::now();
         match self.load(config, db_conn).await {
             Ok(_) => {
-                println!("Loaded {} photos successfully in {}ms", self.len().await, now.elapsed().as_millis());
+                println!(
+                    "Loaded {} photos successfully in {}ms",
+                    self.len().await,
+                    now.elapsed().as_millis()
+                );
                 Ok(())
             }
             Err(error) => {
@@ -358,22 +415,23 @@ impl Gallery {
         }
     }
 
-
     /// Insert an empty array at the given path if it doesn't already exist in the gallery
     pub async fn insert_path(&self, path: &PathBuf) {
         // If this path is not already in the hashmap, insert an empty vec at this key
-        // This is used to make sure that 
+        // This is used to make sure that
         let mut gallery_lock = self.gallery.write().await;
-        gallery_lock.entry(path.to_string_lossy().into_owned())
+        gallery_lock
+            .entry(path.to_string_lossy().into_owned())
             .or_insert_with(|| Vec::new());
     }
 
-
     /// Check if the given path exists in the gallery
     pub async fn path_exists(&self, path: &PathBuf) -> bool {
-        self.gallery.read().await.contains_key(&path.to_string_lossy().to_string())
+        self.gallery
+            .read()
+            .await
+            .contains_key(&path.to_string_lossy().to_string())
     }
-
 
     /// Insert the given photo in the gallery at the given path. If this photo is already registered in the gallery for a given path,
     /// it will not get duplicated, instead the smart pointer that will be inserted will point to the same Photo internally
@@ -381,7 +439,9 @@ impl Gallery {
         // If this photo has already been inserted somewhere in the gallery, it also has an Arc pointer stored in the `photos`
         // hashmap that we can retreive efficiently; otherwise, create a new Arc and insert it into the hashmap
         let mut photos_lock = self.photos.write().await;
-        let cached_photo = photos_lock.entry(photo.uid.clone()).or_insert_with(|| CachedPhoto::new(photo.clone(), passwords.clone()));
+        let cached_photo = photos_lock
+            .entry(photo.uid.clone())
+            .or_insert_with(|| CachedPhoto::new(photo.clone(), passwords.clone()));
 
         // Create a clone of this Arc pointer to share the underlying Photo object
         let photo_pointer = CachedPhoto::clone_from(cached_photo, passwords);
@@ -389,7 +449,9 @@ impl Gallery {
         // If this path has already been inserted in the gallery, retrieve its Vec of Arc pointers to Photo objects; otherwise,
         // create an empty Vec
         let mut gallery_lock = self.gallery.write().await;
-        let vec = gallery_lock.entry(path.to_string_lossy().into_owned()).or_insert_with(|| Vec::new());
+        let vec = gallery_lock
+            .entry(path.to_string_lossy().into_owned())
+            .or_insert_with(|| Vec::new());
 
         // Add this Arc pointer to the list of photos for this path in the gallery if it hasn't already been inserted
         if !vec.iter().any(|cp| cp.photo.uid == photo.uid) {
@@ -397,11 +459,17 @@ impl Gallery {
         }
     }
 
-
     /// Acquire a read lock on the gallery if the path exists, or return None otherwise
-    pub async fn read<'a>(&'a self, path: &'a PathBuf, start: Option<usize>, count: Option<usize>, uid: Option<UID>, provided_passwords: Passwords) -> Option<GalleryReadLock<'a>> {
+    pub async fn read<'a>(
+        &'a self,
+        path: &'a PathBuf,
+        start: Option<usize>,
+        count: Option<usize>,
+        uid: Option<UID>,
+        provided_passwords: Passwords,
+    ) -> Option<GalleryReadLock<'a>> {
         let path = path.to_string_lossy().to_string();
-        
+
         let gallery_read_lock = self.gallery.read().await;
         if gallery_read_lock.contains_key(&path) {
             // All photos available in this path (including some that may not be displayed to the user, if they
@@ -423,11 +491,12 @@ impl Gallery {
                 // Add to the total
                 n_photos += count;
             }
-    
+
             // Compute pagination
             let mut start = start.unwrap_or(0);
             let mut max_count = count.unwrap_or(n_photos);
-            if let Some(uid) = uid { // Only return a single UID if requested
+            if let Some(uid) = uid {
+                // Only return a single UID if requested
                 if let Some(idx) = photos.iter().position(|cp| cp.photo.uid == uid) {
                     start = idx;
                     max_count = 1;
@@ -441,39 +510,52 @@ impl Gallery {
             if start + max_count > n_photos {
                 max_count = n_photos - start;
             }
-            if max_count > 100 { // Limit the maximum number of results to 100
+            if max_count > 100 {
+                // Limit the maximum number of results to 100
                 max_count = 100;
             }
 
             // Return a read lock on the gallery that provides an iterator to access the photos
-            Some(GalleryReadLock::new(gallery_read_lock, path, start, max_count, n_photos, provided_passwords))
-
+            Some(GalleryReadLock::new(
+                gallery_read_lock,
+                path,
+                start,
+                max_count,
+                n_photos,
+                provided_passwords,
+            ))
         } else {
             // This path is not found in the gallery
             None
         }
     }
 
-
     /// Return a copy of a single photo from the cache, based on its UID
     pub async fn get_from_uid(&self, uid: &UID) -> Option<Photo> {
         Some(Photo::clone(&self.photos.read().await.get(uid)?.photo))
     }
-
 
     /// Check if the current session state stored in private cookies as well as any password provided
     /// with the current request grants access to the given path. If a new valid password has been
     /// provided in the current request, add it to the session cookie.
     /// Returns Ok with the list of all passwords in the user's session either if no password is required
     /// or if access is granted, or Err with the kind of error if the password is invalid.
-    pub async fn check_password(&self, path: &PathBuf, cookies: &CookieJar<'_>, request_password: &OptionalPassword) -> Result<Passwords, PasswordError> {
+    pub async fn check_password(
+        &self,
+        path: &PathBuf,
+        cookies: &CookieJar<'_>,
+        request_password: &OptionalPassword,
+    ) -> Result<Passwords, PasswordError> {
         // Get a lock on the gallery's password list
         let gallery_passwords = self.passwords.read().await;
 
         // Compute the list of user-provided passwords
         let mut user_passwords = Passwords::new();
         for (gallery_path, required_password) in gallery_passwords.deref() {
-            if let Some(provided_password) = cookies.get_private(&password::cookie_name(&gallery_path)).map(|c| c.value().to_string()) {
+            if let Some(provided_password) = cookies
+                .get_private(&password::cookie_name(&gallery_path))
+                .map(|c| c.value().to_string())
+            {
                 if &provided_password == required_password {
                     user_passwords.insert(gallery_path.clone(), provided_password);
                 }
@@ -510,8 +592,14 @@ impl Gallery {
                     // Check if the password matches
                     if user_provided_password == required_password {
                         // It does : save it in the session cookies
-                        cookies.add_private(Cookie::new(password::cookie_name(required_password_path), user_provided_password.clone()));
-                        user_passwords.insert(required_password_path.clone(), user_provided_password.clone());
+                        cookies.add_private(Cookie::new(
+                            password::cookie_name(required_password_path),
+                            user_provided_password.clone(),
+                        ));
+                        user_passwords.insert(
+                            required_password_path.clone(),
+                            user_provided_password.clone(),
+                        );
 
                         // Jump to the next required password in the list, if any
                         continue;
@@ -542,36 +630,40 @@ impl Gallery {
         }
     }
 
-
     /// Return a copy of a single photo from the cache based on its UID, with the path to its resized version,
     /// after generating it if necessary
-    pub async fn get_resized_from_uid(&self, uid: &UID, resized_type: ResizedType, config: &Config) -> Result<Option<(Photo, PathBuf)>, Error> {
+    pub async fn get_resized_from_uid(
+        &self,
+        uid: &UID,
+        resized_type: ResizedType,
+        config: &Config,
+    ) -> Result<Option<(Photo, PathBuf)>, Error> {
         match self.get_from_uid(uid).await {
             Some(photo) => {
                 // Generate this file if it doesn't exist
-                let resized_file_path = photo.create_resized(resized_type, config.RESIZED_IMAGE_FORMAT, config).await?;
-    
+                let resized_file_path = photo
+                    .create_resized(resized_type, config.RESIZED_IMAGE_FORMAT, config)
+                    .await?;
+
                 Ok(Some((photo, resized_file_path)))
             }
             None => Ok(None),
         }
     }
 
-
     // Private function used to load photos recursively
     fn load_rec<'a>(
-            &'a self,
-            full_path: &'a PathBuf,
-            rel_path: &'a PathBuf,
-            db_conn: &'a mut PoolConnection<Sqlite>,
-            main_config: &'a Config,
-            configs_stack: &'a mut Vec<(PathBuf, Table)>,
-            default_config: &'a Config,
-            photos_to_insert: &'a mut Option<&mut Vec<Photo>>,
-            photos_to_remove: &'a mut Option<&mut Vec<Photo>>,
-            paths_found: &'a mut Option<&mut Vec<PathBuf>>
-        ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>>
-    {
+        &'a self,
+        full_path: &'a PathBuf,
+        rel_path: &'a PathBuf,
+        db_conn: &'a mut PoolConnection<Sqlite>,
+        main_config: &'a Config,
+        configs_stack: &'a mut Vec<(PathBuf, Table)>,
+        default_config: &'a Config,
+        photos_to_insert: &'a mut Option<&mut Vec<Photo>>,
+        photos_to_remove: &'a mut Option<&mut Vec<Photo>>,
+        paths_found: &'a mut Option<&mut Vec<PathBuf>>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>> {
         Box::pin(async move {
             let rel_path_str = rel_path.to_string_lossy().to_string();
 
@@ -595,28 +687,39 @@ impl Gallery {
                 Ok(config) => {
                     let mut subdirs_configs_lock = self.subdirs_configs.write().await;
                     subdirs_configs_lock.insert(rel_path_str.clone(), config);
-                },
-                Err(error) => eprintln!("Warning : unable to read config in {} : {}", rel_path.display(), error),
+                }
+                Err(error) => eprintln!(
+                    "Warning : unable to read config in {} : {}",
+                    rel_path.display(),
+                    error
+                ),
             }
 
             // If this directory is password-protected, add it to the list
             let password = match subdir_config.get("PASSWORD") {
                 Some(value) if value.is_str() => value.as_str().unwrap().to_string(),
                 Some(_) => {
-                    eprintln!("Warning : invalid value for PASSWORD in {}", rel_path.display());
+                    eprintln!(
+                        "Warning : invalid value for PASSWORD in {}",
+                        rel_path.display()
+                    );
                     // Generate a random password to prevent access
                     base64::encode(rand::random::<[u8; 32]>())
                 }
                 None => "".to_string(),
             };
             if password.len() > 0 {
-                self.passwords.write().await.insert(rel_path_str.clone(), password);
+                self.passwords
+                    .write()
+                    .await
+                    .insert(rel_path_str.clone(), password);
             }
 
             // List the files inside this path in the photos directory
             let mut filenames_in_fs: Vec<String> = Vec::new();
             if photos_to_insert.is_some() || photos_to_remove.is_some() {
-                let dir = fs::read_dir(full_path).await
+                let dir = fs::read_dir(full_path)
+                    .await
                     .map_err(|e| Error::FileError(e, full_path.clone()))?;
                 let mut dir_stream = ReadDirStream::new(dir);
                 while let Some(entry) = dir_stream.next().await {
@@ -624,7 +727,11 @@ impl Gallery {
                     if let Ok(file_type) = entry.file_type().await {
                         if let Ok(filename) = entry.file_name().into_string() {
                             let filename_lowercase = filename.to_lowercase();
-                            if file_type.is_file() && !filename_lowercase.starts_with(".") && (filename_lowercase.ends_with(".jpg") || filename_lowercase.ends_with(".jpeg")) {
+                            if file_type.is_file()
+                                && !filename_lowercase.starts_with(".")
+                                && (filename_lowercase.ends_with(".jpg")
+                                    || filename_lowercase.ends_with(".jpeg"))
+                            {
                                 filenames_in_fs.push(filename);
                             }
                         }
@@ -634,13 +741,24 @@ impl Gallery {
             }
 
             // Get the list of photos saved in the database for this path exactly
-            let sort_columns = String::from(subdir_config.get("SORT_ORDER").and_then(|v| v.as_str()).unwrap_or(&default_config.SORT_ORDER))
-                .split(",").map(|s| String::from(s.trim())).collect::<Vec<String>>();
-            let photos_in_db = db::get_photos_in_path(db_conn, &rel_path, &sort_columns, main_config).await?;
+            let sort_columns = String::from(
+                subdir_config
+                    .get("SORT_ORDER")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&default_config.SORT_ORDER),
+            )
+            .split(",")
+            .map(|s| String::from(s.trim()))
+            .collect::<Vec<String>>();
+            let photos_in_db =
+                db::get_photos_in_path(db_conn, &rel_path, &sort_columns, main_config).await?;
 
             // Find photos in the filesystem that are not in the database yet
             if let Some(ref mut photos_to_insert) = photos_to_insert {
-                let filenames_in_db = photos_in_db.iter().map(|photo| &photo.filename).collect::<Vec<&String>>();
+                let filenames_in_db = photos_in_db
+                    .iter()
+                    .map(|photo| &photo.filename)
+                    .collect::<Vec<&String>>();
                 for filename in &filenames_in_fs {
                     if !filenames_in_db.contains(&filename) {
                         let mut full_path = PathBuf::from(&main_config.PHOTOS_DIR);
@@ -667,7 +785,10 @@ impl Gallery {
 
             // Delete old resized photos from cache
             let mut resized_photos_to_delete: Vec<String> = Vec::new();
-            let all_uids_in_path = photos_in_db.iter().map(|photo| &photo.uid).collect::<Vec<&UID>>();
+            let all_uids_in_path = photos_in_db
+                .iter()
+                .map(|photo| &photo.uid)
+                .collect::<Vec<&UID>>();
             let suffix = ".jpg";
             let mut cache_path = PathBuf::from(&main_config.CACHE_DIR);
             cache_path.push(rel_path);
@@ -682,9 +803,18 @@ impl Gallery {
                                 let filename_lowercase = filename.to_lowercase();
                                 for prefix in ["thumbnail_", "large_"] {
                                     // Check if this is a jpeg file with a known prefix
-                                    if file_type.is_file() && filename_lowercase.starts_with(prefix) && filename_lowercase.ends_with(suffix) {
+                                    if file_type.is_file()
+                                        && filename_lowercase.starts_with(prefix)
+                                        && filename_lowercase.ends_with(suffix)
+                                    {
                                         // Extract the UID from the filename
-                                        let file_uid = UID::try_from(&filename.chars().skip(prefix.len()).take(filename.len() - prefix.len() - suffix.len()).collect::<String>());
+                                        let file_uid = UID::try_from(
+                                            &filename
+                                                .chars()
+                                                .skip(prefix.len())
+                                                .take(filename.len() - prefix.len() - suffix.len())
+                                                .collect::<String>(),
+                                        );
                                         if let Ok(file_uid) = file_uid {
                                             if !all_uids_in_path.contains(&&file_uid) {
                                                 // This UID is not in the database anymore for this path, add it to the 'to remove' list
@@ -700,25 +830,34 @@ impl Gallery {
                 }
                 Err(error) => {
                     if error.kind() != std::io::ErrorKind::NotFound {
-                        eprintln!("Warning : unable to open cache directory \"{}\" : {}", &cache_path.display(), error);
+                        eprintln!(
+                            "Warning : unable to open cache directory \"{}\" : {}",
+                            &cache_path.display(),
+                            error
+                        );
                     }
                 }
             }
             if !resized_photos_to_delete.is_empty() {
                 // Log the list of files to delete
-                println!("Deleting {} obsolete resized photos in \"{}\" from cache : {}", 
-                        resized_photos_to_delete.len(),
-                        &cache_path.display(),
-                        resized_photos_to_delete.iter()
-                            .map(|filename| format!("\"{}\"", filename))
-                            .collect::<Vec<String>>().join(", ")
+                println!(
+                    "Deleting {} obsolete resized photos in \"{}\" from cache : {}",
+                    resized_photos_to_delete.len(),
+                    &cache_path.display(),
+                    resized_photos_to_delete
+                        .iter()
+                        .map(|filename| format!("\"{}\"", filename))
+                        .collect::<Vec<String>>()
+                        .join(", ")
                 );
 
                 // Delete the files
                 for filename in resized_photos_to_delete {
                     let mut path = cache_path.clone();
                     path.push(filename);
-                    fs::remove_file(&path).await.map_err(|e| Error::FileError(e, path.clone()))?;
+                    fs::remove_file(&path)
+                        .await
+                        .map_err(|e| Error::FileError(e, path.clone()))?;
                 }
             }
 
@@ -728,7 +867,8 @@ impl Gallery {
                 let mut passwords: Vec<(String, String)> = Vec::new();
                 for (path, entry_config) in configs_stack[1..configs_stack.len()].iter().rev() {
                     // If we are in a parent directory of the current path, stop adding photos when a SHOW_PHOTOS_FROM_SUBDIRS=false is encountered
-                    let show_photos_from_subdir = entry_config.get("SHOW_PHOTOS_FROM_SUBDIRS")
+                    let show_photos_from_subdir = entry_config
+                        .get("SHOW_PHOTOS_FROM_SUBDIRS")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(default_config.SHOW_PHOTOS_FROM_SUBDIRS);
                     if is_parent && !show_photos_from_subdir {
@@ -736,7 +876,11 @@ impl Gallery {
                     }
 
                     // Remember that a password is required for this photo to be displayed
-                    if let Some(password) = entry_config.get("PASSWORD").and_then(|v| v.as_str()).filter(|&s| !s.is_empty()) {
+                    if let Some(password) = entry_config
+                        .get("PASSWORD")
+                        .and_then(|v| v.as_str())
+                        .filter(|&s| !s.is_empty())
+                    {
                         passwords.push((path.to_string_lossy().to_string(), password.to_string()));
                     }
 
@@ -746,7 +890,8 @@ impl Gallery {
                     }
 
                     // If the current path is marked as hidden, don't add the photos to the parents paths
-                    let hidden = entry_config.get("HIDDEN")
+                    let hidden = entry_config
+                        .get("HIDDEN")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(default_config.HIDDEN);
                     if hidden {
@@ -776,16 +921,23 @@ impl Gallery {
                         }
                     }
                     if !subdirs_in_cache_to_remove.is_empty() {
-                        println!("Removing {} obsolete directory(ies) in cache : {}",
-                                subdirs_in_cache_to_remove.len(),
-                                subdirs_in_cache_to_remove.iter()
-                                    .map(|subdir| format!("\"{}\"", subdir.to_string_lossy()))
-                                    .collect::<Vec<String>>().join(", ")
+                        println!(
+                            "Removing {} obsolete directory(ies) in cache : {}",
+                            subdirs_in_cache_to_remove.len(),
+                            subdirs_in_cache_to_remove
+                                .iter()
+                                .map(|subdir| format!("\"{}\"", subdir.to_string_lossy()))
+                                .collect::<Vec<String>>()
+                                .join(", ")
                         );
                         for subdir in subdirs_in_cache_to_remove {
                             let result = fs::remove_dir_all(&subdir).await;
                             if let Err(error) = result {
-                                eprintln!("Warning : unable to remove directory in cache \"{}\" : {}", subdir.display(), error);
+                                eprintln!(
+                                    "Warning : unable to remove directory in cache \"{}\" : {}",
+                                    subdir.display(),
+                                    error
+                                );
                             }
                         }
                     }
@@ -804,7 +956,18 @@ impl Gallery {
                         subdir_rel_path.push(&subdir);
                         let mut subdir_full_path = full_path.clone();
                         subdir_full_path.push(&subdir);
-                        self.load_rec(&subdir_full_path, &subdir_rel_path, db_conn, main_config, configs_stack, &default_config, photos_to_insert, photos_to_remove, paths_found).await?;
+                        self.load_rec(
+                            &subdir_full_path,
+                            &subdir_rel_path,
+                            db_conn,
+                            main_config,
+                            configs_stack,
+                            &default_config,
+                            photos_to_insert,
+                            photos_to_remove,
+                            paths_found,
+                        )
+                        .await?;
                     }
                 }
             }
@@ -816,9 +979,12 @@ impl Gallery {
         })
     }
 
-
     /// Load all available photos in the photos folder, add them to the given gallery, and sync them with the database
-    async fn load(&self, config: &Config, db_conn: &mut PoolConnection<Sqlite>) -> Result<(), Error> {
+    async fn load(
+        &self,
+        config: &Config,
+        db_conn: &mut PoolConnection<Sqlite>,
+    ) -> Result<(), Error> {
         // Make sure the main directories (photos and cache) exist, and if not, try to create them
         check_config_dir(&PathBuf::from(&config.PHOTOS_DIR)).await
             .or_else(|e| {
@@ -834,7 +1000,7 @@ impl Gallery {
                 }
                 Err(error)
             })?;
-        
+
         // Keep these paths on hand
         let full_path = PathBuf::from(&config.PHOTOS_DIR);
         let rel_path = PathBuf::new();
@@ -856,15 +1022,22 @@ impl Gallery {
         let mut photos_to_remove: Vec<Photo> = Vec::new();
         let mut paths_found: Vec<PathBuf> = Vec::new();
         self.load_rec(
-            &full_path, &rel_path, db_conn,
-            &config, &mut configs_stack, &default_config,
-            &mut Some(&mut photos_to_insert), &mut Some(&mut photos_to_remove), &mut Some(&mut paths_found)
-        ).await?;
+            &full_path,
+            &rel_path,
+            db_conn,
+            &config,
+            &mut configs_stack,
+            &default_config,
+            &mut Some(&mut photos_to_insert),
+            &mut Some(&mut photos_to_remove),
+            &mut Some(&mut paths_found),
+        )
+        .await?;
 
         // Get the list of all known subdirs of the current path in the database, check if some have been removed,
         // and if so add their photos to the 'to_remove' list
         if config.INDEX_SUBDIRS {
-            let mut deleted_paths:Vec<PathBuf> = Vec::new();
+            let mut deleted_paths: Vec<PathBuf> = Vec::new();
             let known_paths_in_db = db::get_all_paths(db_conn).await?;
             for known_path in known_paths_in_db {
                 if !paths_found.contains(&known_path) {
@@ -872,7 +1045,8 @@ impl Gallery {
                 }
             }
             if !deleted_paths.is_empty() {
-                let photos_in_deleted_paths = db::get_photos_in_paths(db_conn, &deleted_paths, &config).await?;
+                let photos_in_deleted_paths =
+                    db::get_photos_in_paths(db_conn, &deleted_paths, &config).await?;
                 for photo in photos_in_deleted_paths {
                     photos_to_remove.push(photo);
                 }
@@ -890,7 +1064,7 @@ impl Gallery {
             while results.len() < n {
                 // Create up to LOADING_WORKERS background tasks
                 let batch_size = min(n - offset, config.LOADING_WORKERS);
-                for idx in offset..offset+batch_size {
+                for idx in offset..offset + batch_size {
                     let photo = &photos_to_insert[idx];
                     let full_path = photo.full_path.clone();
                     tasks.spawn(async move {
@@ -907,13 +1081,23 @@ impl Gallery {
                             results.push((i, md5));
                             let percent: usize = (i + 1) * 100 / n;
                             if percent > last_percent {
-                                print!("\rCalculating MD5 hashes of {} new files... {}%", n, percent);
+                                print!(
+                                    "\rCalculating MD5 hashes of {} new files... {}%",
+                                    n, percent
+                                );
                                 std::io::stdout().flush().ok();
                                 last_percent = percent;
                             }
                         }
-                        Ok((i, Err(error))) => eprintln!("Error : unable to compute MD5 for \"{}\" : {}", photos_to_insert.get(i).unwrap().filename, error),
-                        Err(error) => eprintln!("Error : unable to join background task while computing MD5 : {}", error),
+                        Ok((i, Err(error))) => eprintln!(
+                            "Error : unable to compute MD5 for \"{}\" : {}",
+                            photos_to_insert.get(i).unwrap().filename,
+                            error
+                        ),
+                        Err(error) => eprintln!(
+                            "Error : unable to join background task while computing MD5 : {}",
+                            error
+                        ),
                     }
                 }
             }
@@ -940,7 +1124,9 @@ impl Gallery {
         }
 
         // If there were some modifications to the photos we will need to reload the photos
-        let need_to_reload = !photos_to_insert.is_empty() || !photos_to_remove.is_empty() || !photos_to_move.is_empty();
+        let need_to_reload = !photos_to_insert.is_empty()
+            || !photos_to_remove.is_empty()
+            || !photos_to_move.is_empty();
 
         // Apply detected modifications (photos added, moved, or deleted) to the database
         if !photos_to_insert.is_empty() {
@@ -969,18 +1155,44 @@ impl Gallery {
                     // Background task which takes ownership of the photo object
                     let cache_dir = config.CACHE_DIR.clone();
                     let image_format = config.RESIZED_IMAGE_FORMAT;
-                    tasks.push(tokio::spawn( async move {
+                    tasks.push(tokio::spawn(async move {
                         // Parse the metadata
-                        photo.parse_metadata(true).await
+                        photo
+                            .parse_metadata(true)
+                            .await
                             .or_else(|e| {
-                                eprintln!("Error : unable to open \"{}/{}\" : {}", photo.path.to_string_lossy(), photo.filename, e);
+                                eprintln!(
+                                    "Error : unable to open \"{}/{}\" : {}",
+                                    photo.path.to_string_lossy(),
+                                    photo.filename,
+                                    e
+                                );
                                 Err(e)
-                            }).ok(); // Ignore error after printing it
-                        
+                            })
+                            .ok(); // Ignore error after printing it
+
                         // Generate thumbnails
                         if pre_generate_thumbnails {
-                            photo.create_resized_from_params(ResizedType::THUMBNAIL, image_format, cache_dir.clone(), thumbnail_max_size, thumbnail_quality).await.ok();
-                            photo.create_resized_from_params(ResizedType::LARGE, image_format, cache_dir.clone(), large_size_max_size, large_size_quality).await.ok();
+                            photo
+                                .create_resized_from_params(
+                                    ResizedType::THUMBNAIL,
+                                    image_format,
+                                    cache_dir.clone(),
+                                    thumbnail_max_size,
+                                    thumbnail_quality,
+                                )
+                                .await
+                                .ok();
+                            photo
+                                .create_resized_from_params(
+                                    ResizedType::LARGE,
+                                    image_format,
+                                    cache_dir.clone(),
+                                    large_size_max_size,
+                                    large_size_quality,
+                                )
+                                .await
+                                .ok();
                         }
 
                         // Return ownership of the photo to the main thread
@@ -1003,11 +1215,14 @@ impl Gallery {
             }
 
             // Log the list of photos to insert
-            println!("Inserting {} photo(s) into the database : {}",
-                    photos_to_insert_in_db.len(),
-                    photos_to_insert_in_db.iter()
-                        .map(|photo| format!("\"{}/{}\"", photo.path.to_string_lossy(), photo.filename))
-                        .collect::<Vec<String>>().join(", ")
+            println!(
+                "Inserting {} photo(s) into the database : {}",
+                photos_to_insert_in_db.len(),
+                photos_to_insert_in_db
+                    .iter()
+                    .map(|photo| format!("\"{}/{}\"", photo.path.to_string_lossy(), photo.filename))
+                    .collect::<Vec<String>>()
+                    .join(", ")
             );
 
             // Insert them into the database
@@ -1015,11 +1230,14 @@ impl Gallery {
         }
         if !photos_to_remove.is_empty() {
             // Log the list of photos to remove
-            println!("Removing {} photo(s) from the database : {}",
-                    photos_to_remove.len(),
-                    photos_to_remove.iter()
-                        .map(|photo| format!("\"{}/{}\"", photo.path.to_string_lossy(), photo.filename))
-                        .collect::<Vec<String>>().join(", ")
+            println!(
+                "Removing {} photo(s) from the database : {}",
+                photos_to_remove.len(),
+                photos_to_remove
+                    .iter()
+                    .map(|photo| format!("\"{}/{}\"", photo.path.to_string_lossy(), photo.filename))
+                    .collect::<Vec<String>>()
+                    .join(", ")
             );
 
             // Remove them from the database
@@ -1027,11 +1245,20 @@ impl Gallery {
         }
         if !photos_to_move.is_empty() {
             // Log the list of photos to rename/move
-            println!("Renaming/moving {} photo(s) in the database : {}",
-                    photos_to_move.len(),
-                    photos_to_move.iter()
-                        .map(|pair| format!("\"{}/{}\" -> \"{}/{}\"", pair.0.path.to_string_lossy(), pair.0.filename, pair.1.path.to_string_lossy(), pair.1.filename))
-                        .collect::<Vec<String>>().join(", ")
+            println!(
+                "Renaming/moving {} photo(s) in the database : {}",
+                photos_to_move.len(),
+                photos_to_move
+                    .iter()
+                    .map(|pair| format!(
+                        "\"{}/{}\" -> \"{}/{}\"",
+                        pair.0.path.to_string_lossy(),
+                        pair.0.filename,
+                        pair.1.path.to_string_lossy(),
+                        pair.1.filename
+                    ))
+                    .collect::<Vec<String>>()
+                    .join(", ")
             );
 
             // Update the database
@@ -1042,10 +1269,17 @@ impl Gallery {
         if need_to_reload {
             self.clear().await;
             self.load_rec(
-                &full_path, &rel_path, db_conn,
-                &config, &mut configs_stack, &default_config,
-                &mut None,&mut None, &mut None
-            ).await?;
+                &full_path,
+                &rel_path,
+                db_conn,
+                &config,
+                &mut configs_stack,
+                &default_config,
+                &mut None,
+                &mut None,
+                &mut None,
+            )
+            .await?;
         }
 
         // Update the counts of photos
@@ -1085,7 +1319,11 @@ impl Gallery {
             // Process each photo in this path
             for photo in photos {
                 // List of passwords required to access this photo
-                let mut photo_passwords = photo.passwords.iter().map(|(p, _)| p).collect::<Vec<&String>>();
+                let mut photo_passwords = photo
+                    .passwords
+                    .iter()
+                    .map(|(p, _)| p)
+                    .collect::<Vec<&String>>();
                 photo_passwords.sort_unstable();
 
                 // Try to find this list of passwords in the current hashmap
@@ -1103,19 +1341,26 @@ impl Gallery {
                     *counts_in_path.get_mut(&key_found).unwrap() += 1;
                 } else {
                     // Otherwise, insert it with an initial value of 1
-                    let mut new_key = photo_passwords.iter().map(|&s| s.clone()).collect::<Vec<String>>();
+                    let mut new_key = photo_passwords
+                        .iter()
+                        .map(|&s| s.clone())
+                        .collect::<Vec<String>>();
                     new_key.sort_unstable();
                     counts_in_path.insert(new_key, 1);
                 }
             }
-            
+
             // Add the counts for this path to the main hashmap
             counts_lock.insert(path.clone(), counts_in_path);
         }
     }
 
     // Return the list of known non-hidden subdirectories for the given path
-    pub async fn get_subdirs(&self, path: &PathBuf, always_include: Option<&String>) -> Vec<String> {
+    pub async fn get_subdirs(
+        &self,
+        path: &PathBuf,
+        always_include: Option<&String>,
+    ) -> Vec<String> {
         let subdirs_lock = self.subdirs.read().await;
         if let Some(subdirs) = subdirs_lock.get(&path.to_string_lossy().to_string()) {
             let mut subdirs = subdirs.list_visible();
@@ -1136,14 +1381,12 @@ impl Gallery {
     pub async fn get_passwords(&self) -> RwLockReadGuard<HashMap<String, String>> {
         self.passwords.read().await
     }
-
 }
-
 
 /// RAII read lock on the gallery, obtained with `Gallery::read()`. Every access on the gellery's photos
 /// must pass through an instance of this lock. Concurrent reads are allowed, which means access will
 /// be immediately granted as long as the gallery is not reloading.
-pub struct GalleryReadLock<'a>{
+pub struct GalleryReadLock<'a> {
     guard: RwLockReadGuard<'a, GalleryContent>,
     path: String,
     pub start: usize,
@@ -1153,8 +1396,22 @@ pub struct GalleryReadLock<'a>{
 }
 
 impl<'a> GalleryReadLock<'a> {
-    fn new(guard: RwLockReadGuard<'a, GalleryContent>, path: String, start: usize, max_count: usize, total: usize, provided_passwords: Passwords) -> Self {
-        Self { guard, path, start, max_count, total, provided_passwords }
+    fn new(
+        guard: RwLockReadGuard<'a, GalleryContent>,
+        path: String,
+        start: usize,
+        max_count: usize,
+        total: usize,
+        provided_passwords: Passwords,
+    ) -> Self {
+        Self {
+            guard,
+            path,
+            start,
+            max_count,
+            total,
+            provided_passwords,
+        }
     }
 
     pub fn iter(&'a self) -> GalleryReadIterator<'a> {
@@ -1164,13 +1421,17 @@ impl<'a> GalleryReadLock<'a> {
 
 pub struct GalleryReadIterator<'a> {
     lock: &'a GalleryReadLock<'a>,
-    index: usize, // Current index in the collection, relative to lock.start
+    index: usize,   // Current index in the collection, relative to lock.start
     counter: usize, // Number of photos that have currently be returned to the user, <= index
 }
 
 impl<'a> GalleryReadIterator<'a> {
     fn new(lock: &'a GalleryReadLock<'a>) -> Self {
-        Self { lock, index: 0, counter: 0 }
+        Self {
+            lock,
+            index: 0,
+            counter: 0,
+        }
     }
 }
 
@@ -1187,7 +1448,9 @@ impl<'a> Iterator for GalleryReadIterator<'a> {
 
                 // Check if this photo requires some passwords
                 for (required_password_path, required_password) in &photo.passwords {
-                    if let Some(provided_password) = self.lock.provided_passwords.get(required_password_path) {
+                    if let Some(provided_password) =
+                        self.lock.provided_passwords.get(required_password_path)
+                    {
                         if required_password != provided_password {
                             // This required password is invalid in the user's session
                             continue 'find_a_photo;
@@ -1200,7 +1463,6 @@ impl<'a> Iterator for GalleryReadIterator<'a> {
 
                 self.counter += 1;
                 return Some(&photo.photo);
-
             } else {
                 // No more photos in this gallery
                 return None;
@@ -1211,35 +1473,45 @@ impl<'a> Iterator for GalleryReadIterator<'a> {
     }
 }
 
-
-
 /// Fairing callback used to load/sync the photos with the database at startup
 pub async fn init(rocket: Rocket<rocket::Build>) -> fairing::Result {
     // Make sure the database has been initialized (fairings have been attached in the correct order)
     match db::DB::fetch(&rocket) {
         Some(db) => match db.0.acquire().await {
             Ok(mut db_conn) => {
-                let config = rocket.state::<Config>().expect("Error : unable to obtain the config");
-                let gallery = rocket.state::<Gallery>().expect("Error : unable to obtain the gallery");
+                let config = rocket
+                    .state::<Config>()
+                    .expect("Error : unable to obtain the config");
+                let gallery = rocket
+                    .state::<Gallery>()
+                    .expect("Error : unable to obtain the gallery");
 
                 println!("Loading photos...");
                 let now = Instant::now();
                 match gallery.load(&config, &mut db_conn).await {
                     Ok(_) => {
-                        println!("Loaded {} photos successfully in {}ms", gallery.len().await, now.elapsed().as_millis());
+                        println!(
+                            "Loaded {} photos successfully in {}ms",
+                            gallery.len().await,
+                            now.elapsed().as_millis()
+                        );
                         Ok(rocket)
                     }
                     Err(error) => {
                         eprintln!("Error : unable to load photos : {}", error);
                         Err(rocket)
                     }
-                }}
+                }
+            }
 
             Err(error) => {
-                eprintln!("Error : unable to acquire a connection to the database : {}", error);
+                eprintln!(
+                    "Error : unable to acquire a connection to the database : {}",
+                    error
+                );
                 Err(rocket)
             }
-        }
+        },
         None => {
             eprintln!("Error : unable to obtain a handle to the database");
             Err(rocket)
@@ -1247,41 +1519,42 @@ pub async fn init(rocket: Rocket<rocket::Build>) -> fairing::Result {
     }
 }
 
-
 /// Check that the given path from the config (either PHOTOS_DIR or CACHE_DIR) exists,
 /// and if not, try to create it
 async fn check_config_dir(path: &PathBuf) -> Result<(), Error> {
     // Check the given path
     match path.metadata() {
-
         Ok(metadata) => {
             // The entity exists, check its type
             if metadata.is_dir() {
                 // The given path is a valid directory, accept it
                 Ok(())
-
             } else {
                 // The given path exists but is not a valid directory so we can't create
                 // it (probably a file?), return an AlreadyExists error
-                Err(Error::FileError(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    format!("\"{}\" is not a valid directory", path.display())
-                ), path.clone()))
+                Err(Error::FileError(
+                    io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        format!("\"{}\" is not a valid directory", path.display()),
+                    ),
+                    path.clone(),
+                ))
             }
-        },
+        }
 
         // The directory doesn't exist, try to create it and return the result
         // of that operation directly
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             println!("Creating empty directory \"{}\"", path.display());
-            fs::create_dir_all(path).await.map_err(|e| Error::FileError(e, path.clone()))
+            fs::create_dir_all(path)
+                .await
+                .map_err(|e| Error::FileError(e, path.clone()))
         }
 
         // Return any other error directly
         Err(error) => Err(Error::FileError(error, path.clone())),
     }
 }
-
 
 #[derive(Clone)]
 struct Subdir {
@@ -1324,34 +1597,38 @@ impl Subdirs {
     }
 
     fn sort(&mut self) {
-        self.subdirs.sort_by(|a, b| natord::compare_ignore_case(&a.name, &b.name));
+        self.subdirs
+            .sort_by(|a, b| natord::compare_ignore_case(&a.name, &b.name));
     }
 
     fn list_visible(&self) -> Subdirs {
-        let subdirs = self.subdirs.iter()
+        let subdirs = self
+            .subdirs
+            .iter()
             .filter(|s| !s.hidden)
             .map(|s| s.clone())
             .collect::<Vec<Subdir>>();
-        Self {
-            subdirs,
-        }
+        Self { subdirs }
     }
 
     fn list_names(&self) -> Vec<&String> {
-        self.subdirs.iter()
+        self.subdirs
+            .iter()
             .map(|subdir| &subdir.name)
             .collect::<Vec<_>>()
     }
 
     fn list_names_visible(&self) -> Vec<&String> {
-        self.subdirs.iter()
+        self.subdirs
+            .iter()
             .filter(|subdir| !subdir.hidden)
             .map(|subdir| &subdir.name)
             .collect::<Vec<_>>()
     }
 
     fn list_names_visible_owned(&self) -> Vec<String> {
-        self.list_names_visible().iter()
+        self.list_names_visible()
+            .iter()
             .map(|&s| s.clone())
             .collect::<Vec<String>>()
     }
@@ -1370,7 +1647,6 @@ impl DerefMut for Subdirs {
         &mut self.subdirs
     }
 }
-
 
 /// Return the list of valid subdirectories in the given path in the photos folder
 async fn list_subdirs(path: &PathBuf, config: &Config) -> Result<Subdirs, Error> {
@@ -1398,10 +1674,15 @@ async fn list_subdirs(path: &PathBuf, config: &Config) -> Result<Subdirs, Error>
                     subdir_path.push(&dir_name);
                     let mut subdir_config_table: Table = Table::new();
                     Config::update_with_subdir(&subdir_path, &mut subdir_config_table);
-                    let subdir_config = Config::from_table(subdir_config_table).unwrap_or_else(|error| {
-                        eprintln!("Warning : unable to deserialize local config file in \"{}\" : {}", subdir_path.display(), error);
-                        Config::default()
-                    });
+                    let subdir_config =
+                        Config::from_table(subdir_config_table).unwrap_or_else(|error| {
+                            eprintln!(
+                                "Warning : unable to deserialize local config file in \"{}\" : {}",
+                                subdir_path.display(),
+                                error
+                            );
+                            Config::default()
+                        });
                     if subdir_config.INDEX {
                         subdirs.push(Subdir::new(dir_name, subdir_config.HIDDEN));
                     }
@@ -1413,7 +1694,6 @@ async fn list_subdirs(path: &PathBuf, config: &Config) -> Result<Subdirs, Error>
     subdirs.sort();
     Ok(subdirs)
 }
-
 
 /// Return the list of the names of the valid subdirectories in the given path in the cache folder
 async fn list_subdirs_in_cache(path: &PathBuf, config: &Config) -> Result<Vec<String>, Error> {
@@ -1448,14 +1728,14 @@ async fn list_subdirs_in_cache(path: &PathBuf, config: &Config) -> Result<Vec<St
     Ok(subdirs)
 }
 
-
 /// Calculate and return the MD5 hash of the file located at the given path
 async fn calculate_file_md5(path: &PathBuf) -> Result<String, Error> {
-    let file_content = fs::read(path).await.map_err(|e| Error::FileError(e, path.clone()))?;
+    let file_content = fs::read(path)
+        .await
+        .map_err(|e| Error::FileError(e, path.clone()))?;
     let hash = Md5::digest(file_content);
     Ok(format!("{:x}", hash))
 }
-
 
 /// Kinds of resized versions of photos generated in the cache folder
 pub enum ResizedType {
