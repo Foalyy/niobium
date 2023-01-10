@@ -12,7 +12,7 @@ use config::Config;
 use db::DB;
 use nav_data::NavData;
 use password::OptionalPassword;
-use photos::Gallery;
+use photos::{Gallery, Photo};
 use rocket::fairing::AdHoc;
 use rocket::fs::NamedFile;
 use rocket::http::{CookieJar, Header};
@@ -21,7 +21,7 @@ use rocket::{fs::FileServer, State};
 use rocket_db_pools::{sqlx, Connection, Database};
 use rocket_dyn_templates::{context, Template};
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::{fmt::Display, io};
 use uid::UID;
 
@@ -105,7 +105,7 @@ async fn get_gallery(
             // Check if this path exists
             if gallery.path_exists(&path).await {
                 // This path exists in the gallery, calculate the content of the nav panel
-                match NavData::from_path(&path, &gallery, None).await {
+                match NavData::from_path(&path, gallery, None).await {
                     // Render the template
                     Ok(nav_data) => PageResult::Page(Template::render(
                         "main",
@@ -128,7 +128,7 @@ async fn get_gallery(
                     }
                 }
             } else {
-                page_404(&config)
+                page_404(config)
             }
         }
 
@@ -153,6 +153,7 @@ async fn get_gallery(
 
 /// Route handler called by javascript to return the grid items for the given path and parameters
 #[get("/<path..>?grid&<start>&<count>&<uid>", rank = 10)]
+#[allow(clippy::too_many_arguments)]
 async fn get_grid(
     path: PathBuf,
     start: Option<usize>,
@@ -206,7 +207,7 @@ async fn get_grid(
         }
 
         // A password is required and is either missing or invalid
-        Err(error) => PageResult::PasswordRequired(error.message().to_string()),
+        Err(error) => PageResult::PasswordRequired(error.message()),
     }
 }
 
@@ -222,7 +223,7 @@ async fn get_nav(
     // Check if a password is required to access this path
     match gallery.check_password(&path, cookies, &password).await {
         // Either no password is required or a valid one has been provided
-        Ok(passwords) => match NavData::from_path(&path, &gallery, Some(passwords)).await {
+        Ok(passwords) => match NavData::from_path(&path, gallery, Some(passwords)).await {
             Ok(nav_data) => PageResult::Page(Template::render(
                 "nav",
                 context! {
@@ -241,7 +242,7 @@ async fn get_nav(
         },
 
         // A password is required and is either missing or invalid
-        Err(error) => PageResult::PasswordRequired(error.message().to_string()),
+        Err(error) => PageResult::PasswordRequired(error.message()),
     }
 }
 
@@ -260,20 +261,20 @@ async fn get_grid_item(uid: UID, gallery: &State<Gallery>, config: &State<Config
                 url_download_photo:uri!(download_photo(&uid)),
             },
         )),
-        None => page_404(&config),
+        None => page_404(config),
     }
 }
 
 /// Route handler that returns the thumbnail version of the requested UID
 #[get("/<uid>/thumbnail", rank = 3)]
 async fn get_thumbnail(uid: UID, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
-    get_resized(&uid, photos::ResizedType::THUMBNAIL, &gallery, &config).await
+    get_resized(&uid, photos::ResizedType::THUMBNAIL, gallery, config).await
 }
 
 /// Route handler that returns the large resized version of the requested UID
 #[get("/<uid>/large", rank = 4)]
 async fn get_large(uid: UID, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
-    get_resized(&uid, photos::ResizedType::LARGE, &gallery, &config).await
+    get_resized(&uid, photos::ResizedType::LARGE, gallery, config).await
 }
 
 /// Returns the resized version of the requested UID for the given prefix
@@ -302,7 +303,7 @@ async fn get_resized(
                 }
             }
         }
-        Ok(None) => page_404(&config),
+        Ok(None) => page_404(config),
         Err(error) => {
             eprintln!(
                 "Error : unable to return a resized photo for UID #{} : {}",
@@ -331,7 +332,7 @@ async fn get_photo(uid: UID, gallery: &State<Gallery>, config: &State<Config>) -
                 }
             }
         }
-        None => page_404(&config),
+        None => page_404(config),
     }
 }
 
@@ -341,7 +342,7 @@ async fn download_photo(uid: UID, gallery: &State<Gallery>, config: &State<Confi
     match gallery.get_from_uid(&uid).await {
         Some(photo) => {
             // Try to open the file
-            match DownloadedNamedFile::open(&photo.full_path, &photo.uid, &config).await {
+            match DownloadedNamedFile::open(&photo, config).await {
                 Ok(file) => PageResult::PhotoDownload(file),
                 Err(error) => {
                     eprintln!(
@@ -353,7 +354,7 @@ async fn download_photo(uid: UID, gallery: &State<Gallery>, config: &State<Confi
                 }
             }
         }
-        None => page_404(&config),
+        None => page_404(config),
     }
 }
 
@@ -404,21 +405,19 @@ pub struct DownloadedNamedFile {
 }
 
 impl DownloadedNamedFile {
-    pub async fn open<P>(path: P, uid: &UID, config: &Config) -> io::Result<Self>
-    where
-        P: AsRef<Path>,
-    {
-        NamedFile::open(path).await.map(|file| Self {
-            inner: file,
-            content_disposition: Header::new(
-                rocket::http::hyper::header::CONTENT_DISPOSITION.as_str(),
-                format!(
-                    "attachment; filename=\"{}{}.jpg\"",
-                    &config.DOWNLOAD_PREFIX,
-                    uid.to_string()
+    pub async fn open(photo: &Photo, config: &Config) -> io::Result<Self> {
+        NamedFile::open(photo.full_path.as_path())
+            .await
+            .map(|file| Self {
+                inner: file,
+                content_disposition: Header::new(
+                    rocket::http::hyper::header::CONTENT_DISPOSITION.as_str(),
+                    format!(
+                        "attachment; filename=\"{}{}\"",
+                        &config.DOWNLOAD_PREFIX, photo.filename
+                    ),
                 ),
-            ),
-        })
+            })
     }
 }
 

@@ -2,8 +2,10 @@ use crate::config::Config;
 use crate::password::{self, OptionalPassword, PasswordError, Passwords};
 use crate::uid::UID;
 use crate::{db, Error};
+use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
+use image::{AnimationDecoder, Frame};
 use md5::{Digest, Md5};
 use rocket::futures::StreamExt;
 use rocket::http::{Cookie, CookieJar};
@@ -20,10 +22,11 @@ use rocket_db_pools::Database;
 use serde::Deserialize;
 use std::cmp::min;
 use std::collections::HashMap;
+use std::fs::File;
 use std::future::Future;
 use std::io::{self, Write};
 use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio_stream::wrappers::ReadDirStream;
@@ -58,7 +61,12 @@ pub struct Photo {
 impl Photo {
     /// Try to open the photo file to extract its metadata.
     /// If this has already been done according to the `metadata_parsed` field, this is a no-op.
+    #[allow(clippy::identity_op)]
     pub async fn parse_metadata(&mut self, read_exif: bool) -> Result<(), Error> {
+        if self.should_skip_parse_metadata() {
+            return Ok(());
+        }
+
         if self.metadata_parsed {
             // Metadata already parsed, nothing to do
             return Ok(());
@@ -130,11 +138,12 @@ impl Photo {
     /// Try to parse exif metadata
     pub fn parse_exif(&mut self) -> Result<(), Error> {
         fn remove_quotes(value: String) -> String {
+            #[allow(clippy::redundant_clone)]
             let mut value = value.clone();
-            if value.starts_with("\"") {
+            if value.starts_with('"') {
                 value.remove(0);
             }
-            if value.ends_with("\"") {
+            if value.ends_with('"') {
                 value.pop();
             }
             value
@@ -178,6 +187,41 @@ impl Photo {
         Ok(())
     }
 
+    fn should_skip_parse_metadata(&self) -> bool {
+        self.image_format() == ImageFormat::GIF
+    }
+
+    fn image_format(&self) -> ImageFormat {
+        let filename = self.filename.to_string();
+
+        if filename.ends_with(".jpg") || filename.ends_with(".jpeg") {
+            return ImageFormat::JPEG;
+        }
+
+        if filename.ends_with(".png") {
+            return ImageFormat::PNG;
+        }
+
+        if filename.ends_with(".gif") {
+            return ImageFormat::GIF;
+        }
+
+        if filename.ends_with(".webp") {
+            return ImageFormat::WEBP;
+        }
+
+        ImageFormat::WEBP
+    }
+
+    fn file_extension(&self) -> &str {
+        match self.image_format() {
+            ImageFormat::JPEG => "jpeg",
+            ImageFormat::GIF => "gif",
+            ImageFormat::PNG => "png",
+            ImageFormat::WEBP => "webp",
+        }
+    }
+
     /// Create a resized version of this photo in the cache folder
     async fn create_resized(
         &self,
@@ -197,6 +241,36 @@ impl Photo {
         .await
     }
 
+    fn resized_file_extension(&self, image_format: ImageFormat) -> &str {
+        match (self.image_format(), image_format) {
+            (
+                ImageFormat::JPEG | ImageFormat::PNG | ImageFormat::WEBP,
+                ImageFormat::JPEG | ImageFormat::PNG | ImageFormat::WEBP,
+            ) => image_format.into(),
+            (ImageFormat::GIF, ImageFormat::GIF) => "gif",
+            (_, _) => self.file_extension(),
+        }
+    }
+
+    fn resized_file_path(
+        &self,
+        resized_type: ResizedType,
+        image_format: ImageFormat,
+        cache_dir: &str,
+    ) -> PathBuf {
+        // Path of the resized version of this photo in the cache folder
+        let mut path = PathBuf::from(&cache_dir);
+        path.push(&self.path);
+        path.push(format!(
+            "{}_{}.{}",
+            resized_type.prefix(),
+            &self.uid,
+            // Extention according to the configured image format
+            self.resized_file_extension(image_format)
+        ));
+        path
+    }
+
     async fn create_resized_from_params(
         &self,
         resized_type: ResizedType,
@@ -205,21 +279,8 @@ impl Photo {
         max_size: usize,
         quality: usize,
     ) -> Result<PathBuf, Error> {
-        // Extention according to the configured image format
-        let file_extension = match image_format {
-            ImageFormat::JPEG => "jpg",
-            ImageFormat::WEBP => "webp",
-        };
-
         // Path of the resized version of this photo in the cache folder
-        let mut resized_file_path = PathBuf::from(&cache_dir);
-        resized_file_path.push(&self.path);
-        resized_file_path.push(format!(
-            "{}_{}.{}",
-            resized_type.prefix(),
-            &self.uid,
-            file_extension
-        ));
+        let resized_file_path = self.resized_file_path(resized_type, image_format, &cache_dir);
 
         // Check if the file already exists
         if resized_file_path.exists() {
@@ -236,7 +297,7 @@ impl Photo {
 
         // Make sure the directory exists in the cache folder
         let cache_dir = PathBuf::from(&cache_dir);
-        let dir_path = PathBuf::from(resized_file_path.parent().unwrap_or_else(|| &cache_dir));
+        let dir_path = PathBuf::from(resized_file_path.parent().unwrap_or(&cache_dir));
         if !dir_path.is_dir() {
             create_dir_all(&dir_path).await.map_err(|e| {
                 eprintln!(
@@ -248,7 +309,7 @@ impl Photo {
         }
 
         // Load the image
-        let img = image::io::Reader::open(&file_path)
+        let img = image::io::Reader::open(file_path)
             .map_err(|e| Error::FileError(e, file_path.clone()))?
             .decode()
             .map_err(|e| {
@@ -275,42 +336,105 @@ impl Photo {
         let file = std::fs::File::create(&resized_file_path)
             .map_err(|e| Error::FileError(e, resized_file_path.clone()))?;
         let mut writer = std::io::BufWriter::new(file);
-        match image_format {
-            ImageFormat::JPEG => {
+        match (self.image_format(), image_format) {
+            (ImageFormat::JPEG | ImageFormat::PNG | ImageFormat::WEBP, ImageFormat::JPEG) => {
                 // Create the JPEG encoder with the configured quality
                 let mut encoder = JpegEncoder::new_with_quality(writer, quality);
-
                 // Encode the image
                 encoder
                     .encode_image(&img_resized)
                     .map_err(|e| Error::ImageError(e, file_path.clone()))?;
             }
-            ImageFormat::WEBP => {
+
+            (ImageFormat::JPEG | ImageFormat::PNG | ImageFormat::WEBP, ImageFormat::PNG) => {
+                img_resized
+                    .save(resized_file_path.clone())
+                    .map_err(|e| Error::ImageError(e, file_path.clone()))?;
+            }
+
+            (ImageFormat::JPEG | ImageFormat::PNG | ImageFormat::WEBP, ImageFormat::WEBP) => {
                 // Create the WEPB encoder
-                let encoder = webp::Encoder::from_image(&img_resized).or_else(|error| {
+                let encoder = webp::Encoder::from_image(&img_resized).map_err(|error| {
                     eprintln!(
                         "Error : failed to create a WEBP encoder for \"{}\" : {}",
                         resized_file_path.display(),
                         error
                     );
-                    Err(Error::WebpEncoderError(
-                        error.to_string(),
-                        resized_file_path.clone(),
-                    ))
+                    Error::WebpEncoderError(error.to_string(), resized_file_path.clone())
                 })?;
 
                 // Encode the image to a memory buffer
                 let data = encoder.encode(quality as f32);
 
                 // Write the buffer to the output file
-                writer.write(&*data).or_else(|error| {
+                writer.write(&data).map_err(|error| {
                     eprintln!(
                         "Error : unable to write to \"{}\" : {}",
                         resized_file_path.display(),
                         error
                     );
-                    Err(Error::FileError(error, resized_file_path.clone()))
+                    Error::FileError(error, resized_file_path.clone())
                 })?;
+            }
+
+            (ImageFormat::GIF, _) => {
+                // Read the file header
+                let file =
+                    File::open(file_path).map_err(|e| Error::FileError(e, file_path.clone()))?;
+
+                // Decode a gif into frames
+                let decoder =
+                    GifDecoder::new(file).map_err(|e| Error::ImageError(e, file_path.clone()))?;
+
+                let frames = decoder.into_frames();
+
+                let mut encoder = GifEncoder::new(writer);
+                encoder
+                    .set_repeat(Repeat::Infinite)
+                    .map_err(|e| Error::ImageError(e, file_path.clone()))?;
+
+                let width = max_size as u32;
+                let height = max_size as u32;
+
+                // if true, simply copy original file to target
+                // to prevent up-scaling of GIFs
+                let mut reuse_original = false;
+
+                // Encode frames into a gif and save to a file
+                for frame in frames {
+                    let frame = frame.map_err(|e| Error::ImageError(e, file_path.clone()))?;
+                    let left = frame.left();
+                    let top = frame.top();
+                    let delay = frame.delay();
+                    let image = frame.into_buffer();
+                    if image.width() < width || image.height() < height {
+                        println!(
+                            "GIF is smaller than target size - reusing original: \"{}\"",
+                            file_path.display()
+                        );
+                        reuse_original = true;
+                        break;
+                    }
+
+                    let resized_image =
+                        image::imageops::resize(&image, width, height, FilterType::CatmullRom);
+
+                    encoder
+                        .encode_frame(Frame::from_parts(resized_image, left, top, delay))
+                        .map_err(|e| Error::ImageError(e, file_path.clone()))?;
+                }
+
+                if reuse_original {
+                    std::fs::copy(file_path, resized_file_path.clone())
+                        .map_err(|e| Error::FileError(e, file_path.clone()))?;
+                }
+            }
+
+            (ImageFormat::JPEG | ImageFormat::PNG | ImageFormat::WEBP, ImageFormat::GIF) => {
+                return Err(Error::OtherError(format!(
+                    "Cannot convert {:?} into GIF",
+                    self.image_format()
+                )))
             }
         }
 
@@ -329,14 +453,14 @@ impl CachedPhoto {
     fn new(photo: Photo, passwords: Vec<(String, String)>) -> Self {
         Self {
             photo: Arc::new(photo),
-            passwords: passwords,
+            passwords,
         }
     }
 
     fn clone_from(photo: &CachedPhoto, passwords: Vec<(String, String)>) -> Self {
         Self {
             photo: Arc::clone(&photo.photo),
-            passwords: passwords,
+            passwords,
         }
     }
 }
@@ -345,7 +469,7 @@ impl Deref for CachedPhoto {
     type Target = Photo;
 
     fn deref(&self) -> &Self::Target {
-        &self.photo.as_ref()
+        self.photo.as_ref()
     }
 }
 
@@ -416,17 +540,17 @@ impl Gallery {
     }
 
     /// Insert an empty array at the given path if it doesn't already exist in the gallery
-    pub async fn insert_path(&self, path: &PathBuf) {
+    pub async fn insert_path(&self, path: &Path) {
         // If this path is not already in the hashmap, insert an empty vec at this key
         // This is used to make sure that
         let mut gallery_lock = self.gallery.write().await;
         gallery_lock
             .entry(path.to_string_lossy().into_owned())
-            .or_insert_with(|| Vec::new());
+            .or_insert_with(Vec::new);
     }
 
     /// Check if the given path exists in the gallery
-    pub async fn path_exists(&self, path: &PathBuf) -> bool {
+    pub async fn path_exists(&self, path: &Path) -> bool {
         self.gallery
             .read()
             .await
@@ -435,7 +559,7 @@ impl Gallery {
 
     /// Insert the given photo in the gallery at the given path. If this photo is already registered in the gallery for a given path,
     /// it will not get duplicated, instead the smart pointer that will be inserted will point to the same Photo internally
-    async fn insert_photo(&self, path: &PathBuf, photo: &Photo, passwords: Vec<(String, String)>) {
+    async fn insert_photo(&self, path: &Path, photo: &Photo, passwords: Vec<(String, String)>) {
         // If this photo has already been inserted somewhere in the gallery, it also has an Arc pointer stored in the `photos`
         // hashmap that we can retreive efficiently; otherwise, create a new Arc and insert it into the hashmap
         let mut photos_lock = self.photos.write().await;
@@ -451,7 +575,7 @@ impl Gallery {
         let mut gallery_lock = self.gallery.write().await;
         let vec = gallery_lock
             .entry(path.to_string_lossy().into_owned())
-            .or_insert_with(|| Vec::new());
+            .or_insert_with(Vec::new);
 
         // Add this Arc pointer to the list of photos for this path in the gallery if it hasn't already been inserted
         if !vec.iter().any(|cp| cp.photo.uid == photo.uid) {
@@ -462,7 +586,7 @@ impl Gallery {
     /// Acquire a read lock on the gallery if the path exists, or return None otherwise
     pub async fn read<'a>(
         &'a self,
-        path: &'a PathBuf,
+        path: &'a Path,
         start: Option<usize>,
         count: Option<usize>,
         uid: Option<UID>,
@@ -542,7 +666,7 @@ impl Gallery {
     /// or if access is granted, or Err with the kind of error if the password is invalid.
     pub async fn check_password(
         &self,
-        path: &PathBuf,
+        path: &Path,
         cookies: &CookieJar<'_>,
         request_password: &OptionalPassword,
     ) -> Result<Passwords, PasswordError> {
@@ -553,7 +677,7 @@ impl Gallery {
         let mut user_passwords = Passwords::new();
         for (gallery_path, required_password) in gallery_passwords.deref() {
             if let Some(provided_password) = cookies
-                .get_private(&password::cookie_name(&gallery_path))
+                .get_private(&password::cookie_name(gallery_path))
                 .map(|c| c.value().to_string())
             {
                 if &provided_password == required_password {
@@ -564,7 +688,7 @@ impl Gallery {
 
         // Compute the list of required passwords to access this path
         let mut required_passwords = Passwords::new();
-        let mut path_current = path.clone();
+        let mut path_current = path.to_path_buf();
         let empty_path = PathBuf::new();
         while path_current != empty_path {
             let path_current_str = path_current.to_string_lossy().to_string();
@@ -581,7 +705,7 @@ impl Gallery {
 
         if required_passwords.is_empty() {
             // No password required
-            return Ok(user_passwords);
+            Ok(user_passwords)
         } else {
             // At least one password is required, check all of them in order
             for required_password_path in paths_requiring_passwords {
@@ -616,7 +740,7 @@ impl Gallery {
                         // It doesn't match : return "invalid password"
                         return Err(PasswordError::Invalid(required_password_path.clone()));
                     }
-                } else if let Some(_) = request_password.as_string() {
+                } else if request_password.as_string().is_some() {
                     // An invalid password was provided in the current request : return "invalid password"
                     return Err(PasswordError::Invalid(required_password_path.clone()));
                 } else {
@@ -626,7 +750,7 @@ impl Gallery {
             }
 
             // All passwords have been provided
-            return Ok(user_passwords);
+            Ok(user_passwords)
         }
     }
 
@@ -651,7 +775,18 @@ impl Gallery {
         }
     }
 
+    fn is_photo_filename(&self, filename: &str) -> bool {
+        let filename = filename.to_lowercase();
+        !filename.starts_with('.')
+            && (filename.ends_with(".jpg")
+                || filename.ends_with(".jpeg")
+                || filename.ends_with(".png")
+                || filename.ends_with(".gif")
+                || filename.ends_with(".webp"))
+    }
+
     // Private function used to load photos recursively
+    #[allow(clippy::too_many_arguments)]
     fn load_rec<'a>(
         &'a self,
         full_path: &'a PathBuf,
@@ -671,7 +806,7 @@ impl Gallery {
             if let Some(paths_found) = paths_found {
                 paths_found.push(rel_path.clone());
             }
-            self.insert_path(&rel_path).await;
+            self.insert_path(rel_path).await;
 
             // Try to find a config file in this directory, append it to a copy of the current one (so it won't propagate to
             // sibling directories), and put it on the stack
@@ -680,7 +815,7 @@ impl Gallery {
             if rel_path != &PathBuf::new() {
                 cfg.remove("PASSWORD");
             }
-            Config::update_with_subdir(&full_path, &mut cfg);
+            Config::update_with_subdir(full_path, &mut cfg);
             configs_stack.push((rel_path.clone(), cfg));
             let subdir_config = &configs_stack.last().unwrap().1;
             match Config::from_table(subdir_config.clone()) {
@@ -708,7 +843,7 @@ impl Gallery {
                 }
                 None => "".to_string(),
             };
-            if password.len() > 0 {
+            if !password.is_empty() {
                 self.passwords
                     .write()
                     .await
@@ -726,12 +861,7 @@ impl Gallery {
                     let entry = entry.map_err(|e| Error::FileError(e, full_path.clone()))?;
                     if let Ok(file_type) = entry.file_type().await {
                         if let Ok(filename) = entry.file_name().into_string() {
-                            let filename_lowercase = filename.to_lowercase();
-                            if file_type.is_file()
-                                && !filename_lowercase.starts_with(".")
-                                && (filename_lowercase.ends_with(".jpg")
-                                    || filename_lowercase.ends_with(".jpeg"))
-                            {
+                            if file_type.is_file() && self.is_photo_filename(&filename) {
                                 filenames_in_fs.push(filename);
                             }
                         }
@@ -747,11 +877,11 @@ impl Gallery {
                     .and_then(|v| v.as_str())
                     .unwrap_or(&default_config.SORT_ORDER),
             )
-            .split(",")
+            .split(',')
             .map(|s| String::from(s.trim()))
             .collect::<Vec<String>>();
             let photos_in_db =
-                db::get_photos_in_path(db_conn, &rel_path, &sort_columns, main_config).await?;
+                db::get_photos_in_path(db_conn, rel_path, &sort_columns, main_config).await?;
 
             // Find photos in the filesystem that are not in the database yet
             if let Some(ref mut photos_to_insert) = photos_to_insert {
@@ -762,8 +892,8 @@ impl Gallery {
                 for filename in &filenames_in_fs {
                     if !filenames_in_db.contains(&filename) {
                         let mut full_path = PathBuf::from(&main_config.PHOTOS_DIR);
-                        full_path.push(&rel_path);
-                        full_path.push(&filename);
+                        full_path.push(rel_path);
+                        full_path.push(filename);
                         photos_to_insert.push(Photo {
                             path: rel_path.clone(),
                             filename: filename.clone(),
@@ -789,7 +919,6 @@ impl Gallery {
                 .iter()
                 .map(|photo| &photo.uid)
                 .collect::<Vec<&UID>>();
-            let suffix = ".jpg";
             let mut cache_path = PathBuf::from(&main_config.CACHE_DIR);
             cache_path.push(rel_path);
             match fs::read_dir(&cache_path).await {
@@ -801,6 +930,7 @@ impl Gallery {
                         if let Ok(file_type) = entry.file_type().await {
                             if let Ok(filename) = entry.file_name().into_string() {
                                 let filename_lowercase = filename.to_lowercase();
+                                let suffix = filename_lowercase.split('.').last().unwrap();
                                 for prefix in ["thumbnail_", "large_"] {
                                     // Check if this is a jpeg file with a known prefix
                                     if file_type.is_file()
@@ -905,18 +1035,18 @@ impl Gallery {
             // If the INDEX_SUBDIRS config is enabled, recursively load photos from subdirectories
             if main_config.INDEX_SUBDIRS {
                 // Find the list of valid subdirectories in the path, in the filesystem
-                let subdirs = list_subdirs(&rel_path, main_config).await?;
+                let subdirs = list_subdirs(rel_path, main_config).await?;
                 let subdirs_names = subdirs.list_names();
 
                 // Clean obsolete subdirectories (that do not correspond to a subdirectory in the photos folder) from the cache folder
-                let subdirs_in_cache = list_subdirs_in_cache(&rel_path, main_config).await?;
+                let subdirs_in_cache = list_subdirs_in_cache(rel_path, main_config).await?;
                 if !subdirs_in_cache.is_empty() {
                     let mut subdirs_in_cache_to_remove: Vec<PathBuf> = Vec::new();
                     for subdir in subdirs_in_cache {
                         if !subdirs_names.contains(&&subdir) {
                             let mut subdir_path = PathBuf::from(&main_config.CACHE_DIR);
-                            subdir_path.push(&rel_path);
-                            subdir_path.push(&subdir);
+                            subdir_path.push(rel_path);
+                            subdir_path.push(subdir);
                             subdirs_in_cache_to_remove.push(subdir_path);
                         }
                     }
@@ -953,16 +1083,16 @@ impl Gallery {
                 if !subdirs.is_empty() {
                     for subdir in subdirs.list_names() {
                         let mut subdir_rel_path = rel_path.clone();
-                        subdir_rel_path.push(&subdir);
+                        subdir_rel_path.push(subdir);
                         let mut subdir_full_path = full_path.clone();
-                        subdir_full_path.push(&subdir);
+                        subdir_full_path.push(subdir);
                         self.load_rec(
                             &subdir_full_path,
                             &subdir_rel_path,
                             db_conn,
                             main_config,
                             configs_stack,
-                            &default_config,
+                            default_config,
                             photos_to_insert,
                             photos_to_remove,
                             paths_found,
@@ -987,18 +1117,18 @@ impl Gallery {
     ) -> Result<(), Error> {
         // Make sure the main directories (photos and cache) exist, and if not, try to create them
         check_config_dir(&PathBuf::from(&config.PHOTOS_DIR)).await
-            .or_else(|e| {
+            .map_err(|e| {
                 if let Error::FileError(error, path) = &e {
-                    println!("There is an issue with the PHOTOS_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error.to_string());
+                    println!("There is an issue with the PHOTOS_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error);
                 }
-                Err(e)
+                e
             })?;
         check_config_dir(&PathBuf::from(&config.CACHE_DIR)).await
-            .or_else(|error| {
+            .map_err(|error| {
                 if let Error::FileError(error, path) = &error {
-                    eprintln!("There is an issue with the CACHE_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error.to_string());
+                    eprintln!("There is an issue with the CACHE_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error);
                 }
-                Err(error)
+                error
             })?;
 
         // Keep these paths on hand
@@ -1025,7 +1155,7 @@ impl Gallery {
             &full_path,
             &rel_path,
             db_conn,
-            &config,
+            config,
             &mut configs_stack,
             &default_config,
             &mut Some(&mut photos_to_insert),
@@ -1046,7 +1176,7 @@ impl Gallery {
             }
             if !deleted_paths.is_empty() {
                 let photos_in_deleted_paths =
-                    db::get_photos_in_paths(db_conn, &deleted_paths, &config).await?;
+                    db::get_photos_in_paths(db_conn, &deleted_paths, config).await?;
                 for photo in photos_in_deleted_paths {
                     photos_to_remove.push(photo);
                 }
@@ -1064,8 +1194,12 @@ impl Gallery {
             while results.len() < n {
                 // Create up to LOADING_WORKERS background tasks
                 let batch_size = min(n - offset, config.LOADING_WORKERS);
-                for idx in offset..offset + batch_size {
-                    let photo = &photos_to_insert[idx];
+                for (idx, photo) in photos_to_insert
+                    .iter()
+                    .enumerate()
+                    .skip(offset)
+                    .take(batch_size)
+                {
                     let full_path = photo.full_path.clone();
                     tasks.spawn(async move {
                         let full_path = full_path;
@@ -1160,14 +1294,14 @@ impl Gallery {
                         photo
                             .parse_metadata(true)
                             .await
-                            .or_else(|e| {
+                            .map_err(|e| {
                                 eprintln!(
                                     "Error : unable to open \"{}/{}\" : {}",
                                     photo.path.to_string_lossy(),
                                     photo.filename,
                                     e
                                 );
-                                Err(e)
+                                e
                             })
                             .ok(); // Ignore error after printing it
 
@@ -1272,7 +1406,7 @@ impl Gallery {
                 &full_path,
                 &rel_path,
                 db_conn,
-                &config,
+                config,
                 &mut configs_stack,
                 &default_config,
                 &mut None,
@@ -1356,11 +1490,7 @@ impl Gallery {
     }
 
     // Return the list of known non-hidden subdirectories for the given path
-    pub async fn get_subdirs(
-        &self,
-        path: &PathBuf,
-        always_include: Option<&String>,
-    ) -> Vec<String> {
+    pub async fn get_subdirs(&self, path: &Path, always_include: Option<&String>) -> Vec<String> {
         let subdirs_lock = self.subdirs.read().await;
         if let Some(subdirs) = subdirs_lock.get(&path.to_string_lossy().to_string()) {
             let mut subdirs = subdirs.list_visible();
@@ -1488,7 +1618,7 @@ pub async fn init(rocket: Rocket<rocket::Build>) -> fairing::Result {
 
                 println!("Loading photos...");
                 let now = Instant::now();
-                match gallery.load(&config, &mut db_conn).await {
+                match gallery.load(config, &mut db_conn).await {
                     Ok(_) => {
                         println!(
                             "Loaded {} photos successfully in {}ms",
@@ -1606,7 +1736,7 @@ impl Subdirs {
             .subdirs
             .iter()
             .filter(|s| !s.hidden)
-            .map(|s| s.clone())
+            .cloned()
             .collect::<Vec<Subdir>>();
         Self { subdirs }
     }
@@ -1668,7 +1798,7 @@ async fn list_subdirs(path: &PathBuf, config: &Config) -> Result<Subdirs, Error>
         let entry = entry.map_err(|e| Error::FileError(e, full_path.clone()))?;
         if let Ok(file_type) = entry.file_type().await {
             if let Ok(dir_name) = entry.file_name().into_string() {
-                if file_type.is_dir() && !dir_name.starts_with(".") {
+                if file_type.is_dir() && !dir_name.starts_with('.') {
                     // This is a valid subdirectory, check if it contains a config that would forbid including it in the results
                     let mut subdir_path = full_path.clone();
                     subdir_path.push(&dir_name);
@@ -1718,7 +1848,7 @@ async fn list_subdirs_in_cache(path: &PathBuf, config: &Config) -> Result<Vec<St
         let entry = entry.map_err(|e| Error::FileError(e, full_path.clone()))?;
         if let Ok(file_type) = entry.file_type().await {
             if let Ok(dir_name) = entry.file_name().into_string() {
-                if file_type.is_dir() && !dir_name.starts_with(".") {
+                if file_type.is_dir() && !dir_name.starts_with('.') {
                     subdirs.push(dir_name);
                 }
             }
@@ -1738,6 +1868,8 @@ async fn calculate_file_md5(path: &PathBuf) -> Result<String, Error> {
 }
 
 /// Kinds of resized versions of photos generated in the cache folder
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Copy, Clone)]
 pub enum ResizedType {
     /// Thumbnail-sized photos displayed in the grid
     THUMBNAIL,
@@ -1770,9 +1902,121 @@ impl ResizedType {
 }
 
 /// Available image formats for cache files
-#[derive(Debug, Serialize, Deserialize, Copy, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, Default, Eq, PartialEq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum ImageFormat {
     JPEG,
+    GIF,
+    PNG,
     #[default]
     WEBP,
+}
+
+impl From<ImageFormat> for &str {
+    fn from(value: ImageFormat) -> Self {
+        match value {
+            ImageFormat::GIF => "gif",
+            ImageFormat::JPEG => "jpeg",
+            ImageFormat::PNG => "png",
+            ImageFormat::WEBP => "webp",
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    mod photo {
+        use crate::photos::{ImageFormat, Photo};
+
+        #[test]
+        fn image_format() {
+            let mut photo: Photo = Photo::default();
+
+            photo.filename = "picture.jpeg".to_string();
+            assert_eq!(photo.image_format(), ImageFormat::JPEG);
+
+            photo.filename = "picture.jpg".to_string();
+            assert_eq!(photo.image_format(), ImageFormat::JPEG);
+
+            photo.filename = "picture.png".to_string();
+            assert_eq!(photo.image_format(), ImageFormat::PNG);
+
+            photo.filename = "picture.gif".to_string();
+            assert_eq!(photo.image_format(), ImageFormat::GIF);
+
+            photo.filename = "picture.webp".to_string();
+            assert_eq!(photo.image_format(), ImageFormat::WEBP);
+        }
+
+        #[test]
+        fn file_extension() {
+            let mut photo: Photo = Photo::default();
+
+            photo.filename = "picture.jpeg".to_string();
+            assert_eq!(photo.file_extension(), "jpeg");
+
+            photo.filename = "picture.jpg".to_string();
+            assert_eq!(photo.file_extension(), "jpeg");
+
+            photo.filename = "picture.png".to_string();
+            assert_eq!(photo.file_extension(), "png");
+
+            photo.filename = "picture.gif".to_string();
+            assert_eq!(photo.file_extension(), "gif");
+
+            photo.filename = "picture.webp".to_string();
+            assert_eq!(photo.file_extension(), "webp");
+        }
+
+        #[test]
+        fn resized_file_extension() {
+            let mut photo: Photo = Photo::default();
+
+            photo.filename = "picture.jpeg".to_string();
+            assert_eq!(photo.resized_file_extension(ImageFormat::JPEG), "jpeg");
+            assert_eq!(photo.resized_file_extension(ImageFormat::PNG), "png");
+            assert_eq!(photo.resized_file_extension(ImageFormat::WEBP), "webp");
+
+            photo.filename = "picture.jpg".to_string();
+            assert_eq!(photo.resized_file_extension(ImageFormat::JPEG), "jpeg");
+            assert_eq!(photo.resized_file_extension(ImageFormat::PNG), "png");
+            assert_eq!(photo.resized_file_extension(ImageFormat::WEBP), "webp");
+
+            photo.filename = "picture.png".to_string();
+            assert_eq!(photo.resized_file_extension(ImageFormat::JPEG), "jpeg");
+            assert_eq!(photo.resized_file_extension(ImageFormat::PNG), "png");
+            assert_eq!(photo.resized_file_extension(ImageFormat::WEBP), "webp");
+
+            photo.filename = "picture.gif".to_string();
+            assert_eq!(photo.resized_file_extension(ImageFormat::JPEG), "gif");
+            assert_eq!(photo.resized_file_extension(ImageFormat::PNG), "gif");
+            assert_eq!(photo.resized_file_extension(ImageFormat::WEBP), "gif");
+
+            photo.filename = "picture.webp".to_string();
+            assert_eq!(photo.resized_file_extension(ImageFormat::JPEG), "jpeg");
+            assert_eq!(photo.resized_file_extension(ImageFormat::PNG), "png");
+            assert_eq!(photo.resized_file_extension(ImageFormat::WEBP), "webp");
+        }
+
+        #[test]
+        fn should_skip_parse_metadata() {
+            let mut photo: Photo = Photo::default();
+
+            photo.filename = "picture.jpeg".to_string();
+            assert_eq!(photo.should_skip_parse_metadata(), false);
+
+            photo.filename = "picture.jpg".to_string();
+            assert_eq!(photo.should_skip_parse_metadata(), false);
+
+            photo.filename = "picture.png".to_string();
+            assert_eq!(photo.should_skip_parse_metadata(), false);
+
+            photo.filename = "picture.gif".to_string();
+            assert_eq!(photo.should_skip_parse_metadata(), true);
+
+            photo.filename = "picture.webp".to_string();
+            assert_eq!(photo.should_skip_parse_metadata(), false);
+        }
+    }
 }
