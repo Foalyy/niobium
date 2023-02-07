@@ -47,10 +47,7 @@ impl<'r> FromRequest<'r> for OptionalPassword {
             Some(header) => match OptionalPassword::from_base64(header) {
                 Ok(password) => request::Outcome::Success(password),
                 Err(error) => {
-                    eprintln!(
-                        "Warning : a client sent an invalid Authorization header : {}",
-                        error
-                    );
+                    eprintln!("Warning : a client sent an invalid Authorization header : {error}");
                     request::Outcome::Failure((Status::BadGateway, error))
                 }
             },
@@ -101,14 +98,14 @@ impl PasswordError {
                 if path.is_empty() {
                     "A password is required to access this gallery".to_string()
                 } else {
-                    format!("A password is required to access \"{}\"", path)
+                    format!("A password is required to access \"{path}\"")
                 }
             }
             PasswordError::Invalid(path) => {
                 if path.is_empty() {
                     "Invalid password".to_string()
                 } else {
-                    format!("Invalid password for \"{}\"", path)
+                    format!("Invalid password for \"{path}\"")
                 }
             }
         }
@@ -116,5 +113,5 @@ impl PasswordError {
 }
 
 pub fn cookie_name(path: &str) -> String {
-    format!("niobium_pw_{}", path)
+    format!("niobium_pw_{path}")
 }

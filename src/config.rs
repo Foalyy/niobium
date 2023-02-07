@@ -251,10 +251,7 @@ impl Config {
                 std::process::exit(-1);
             }
             Error::TomlParserError(error) => {
-                eprintln!(
-                    "Error, unable to parse the config file \"{}\" : {}",
-                    FILENAME, error
-                );
+                eprintln!("Error, unable to parse the config file \"{FILENAME}\" : {error}");
                 std::process::exit(-1);
             }
             _ => std::process::exit(-1),
@@ -443,11 +440,11 @@ pub fn get_secret_key_or_exit() -> String {
             rand::thread_rng().fill_bytes(&mut rand_buffer);
             let secret = base64::encode(rand_buffer);
             let mut file = File::create(&path).unwrap_or_else(|error| {
-                eprintln!("\nError : unable to create the .secret file : {}", error);
+                eprintln!("\nError : unable to create the .secret file : {error}");
                 std::process::exit(-1);
             });
-            writeln!(&mut file, "{}", secret).unwrap_or_else(|error| {
-                eprintln!("\nError : unable to write to the .secret file : {}", error);
+            writeln!(&mut file, "{secret}").unwrap_or_else(|error| {
+                eprintln!("\nError : unable to write to the .secret file : {error}");
                 std::process::exit(-1);
             });
             println!(" done");
@@ -456,7 +453,7 @@ pub fn get_secret_key_or_exit() -> String {
 
         // The secret file can't be read for some other reason
         Err(error) => {
-            eprintln!("Error : unable to read the .secret file : {}", error);
+            eprintln!("Error : unable to read the .secret file : {error}");
             std::process::exit(-1);
         }
     }

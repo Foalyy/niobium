@@ -408,7 +408,7 @@ impl Gallery {
                 Ok(())
             }
             Err(error) => {
-                eprintln!("Error : unable to load photos : {}", error);
+                eprintln!("Error : unable to load photos : {error}");
                 Err(error)
             }
         }
@@ -846,7 +846,7 @@ impl Gallery {
                     &cache_path.display(),
                     resized_photos_to_delete
                         .iter()
-                        .map(|filename| format!("\"{}\"", filename))
+                        .map(|filename| format!("\"{filename}\""))
                         .collect::<Vec<String>>()
                         .join(", ")
                 );
@@ -1085,10 +1085,7 @@ impl Gallery {
                             results.push((i, md5));
                             let percent: usize = (i + 1) * 100 / n;
                             if percent > last_percent {
-                                print!(
-                                    "\rCalculating MD5 hashes of {} new files... {}%",
-                                    n, percent
-                                );
+                                print!("\rCalculating MD5 hashes of {n} new files... {percent}%");
                                 std::io::stdout().flush().ok();
                                 last_percent = percent;
                             }
@@ -1099,8 +1096,7 @@ impl Gallery {
                             error
                         ),
                         Err(error) => eprintln!(
-                            "Error : unable to join background task while computing MD5 : {}",
-                            error
+                            "Error : unable to join background task while computing MD5 : {error}"
                         ),
                     }
                 }
@@ -1146,10 +1142,10 @@ impl Gallery {
 
             // Parse the photos' metadata and, if set in the config, generate their thumbnails
             let pre_generate_thumbnails = config.PRE_GENERATE_THUMBNAILS;
-            let thumbnail_max_size = ResizedType::THUMBNAIL.max_size(config);
-            let thumbnail_quality = ResizedType::THUMBNAIL.quality(config);
-            let large_size_max_size = ResizedType::LARGE.max_size(config);
-            let large_size_quality = ResizedType::LARGE.quality(config);
+            let thumbnail_max_size = ResizedType::Thumbnail.max_size(config);
+            let thumbnail_quality = ResizedType::Thumbnail.quality(config);
+            let large_size_max_size = ResizedType::Large.max_size(config);
+            let large_size_quality = ResizedType::Large.quality(config);
             let mut photos_to_insert_in_db: Vec<Photo> = Vec::new();
             while !photos_to_insert.is_empty() {
                 // Spawn background tasks to parallelize computation, up to the LOADING_WORKERS setting in the config
@@ -1179,7 +1175,7 @@ impl Gallery {
                         if pre_generate_thumbnails {
                             photo
                                 .create_resized_from_params(
-                                    ResizedType::THUMBNAIL,
+                                    ResizedType::Thumbnail,
                                     image_format,
                                     cache_dir.clone(),
                                     thumbnail_max_size,
@@ -1189,7 +1185,7 @@ impl Gallery {
                                 .ok();
                             photo
                                 .create_resized_from_params(
-                                    ResizedType::LARGE,
+                                    ResizedType::Large,
                                     image_format,
                                     cache_dir.clone(),
                                     large_size_max_size,
@@ -1498,17 +1494,14 @@ pub async fn init(rocket: Rocket<rocket::Build>) -> fairing::Result {
                         Ok(rocket)
                     }
                     Err(error) => {
-                        eprintln!("Error : unable to load photos : {}", error);
+                        eprintln!("Error : unable to load photos : {error}");
                         Err(rocket)
                     }
                 }
             }
 
             Err(error) => {
-                eprintln!(
-                    "Error : unable to acquire a connection to the database : {}",
-                    error
-                );
+                eprintln!("Error : unable to acquire a connection to the database : {error}");
                 Err(rocket)
             }
         },
@@ -1734,38 +1727,37 @@ async fn calculate_file_md5(path: &PathBuf) -> Result<String, Error> {
         .await
         .map_err(|e| Error::FileError(e, path.clone()))?;
     let hash = Md5::digest(file_content);
-    Ok(format!("{:x}", hash))
+    Ok(format!("{hash:x}"))
 }
 
 /// Kinds of resized versions of photos generated in the cache folder
-#[allow(clippy::upper_case_acronyms)]
 pub enum ResizedType {
     /// Thumbnail-sized photos displayed in the grid
-    THUMBNAIL,
+    Thumbnail,
 
     /// Large-size photos displayed in loupe mode
-    LARGE,
+    Large,
 }
 
 impl ResizedType {
     pub fn prefix(&self) -> &'static str {
         match self {
-            ResizedType::THUMBNAIL => "thumbnail",
-            ResizedType::LARGE => "large",
+            ResizedType::Thumbnail => "thumbnail",
+            ResizedType::Large => "large",
         }
     }
 
     pub fn max_size(&self, config: &Config) -> usize {
         match self {
-            ResizedType::THUMBNAIL => config.THUMBNAIL_MAX_SIZE,
-            ResizedType::LARGE => config.LARGE_VIEW_MAX_SIZE,
+            ResizedType::Thumbnail => config.THUMBNAIL_MAX_SIZE,
+            ResizedType::Large => config.LARGE_VIEW_MAX_SIZE,
         }
     }
 
     pub fn quality(&self, config: &Config) -> usize {
         match self {
-            ResizedType::THUMBNAIL => config.THUMBNAIL_QUALITY,
-            ResizedType::LARGE => config.LARGE_VIEW_QUALITY,
+            ResizedType::Thumbnail => config.THUMBNAIL_QUALITY,
+            ResizedType::Large => config.LARGE_VIEW_QUALITY,
         }
     }
 }

@@ -1,3 +1,5 @@
+#![allow(clippy::unused_unit)]
+
 #[macro_use]
 extern crate rocket;
 
@@ -82,7 +84,7 @@ async fn rocket() -> _ {
         .attach(AdHoc::try_on_ignite("Photos init", photos::init))
         .attach(AdHoc::on_liftoff("Startup message", move |_| {
             Box::pin(async move {
-                println!("## Niobium started on {}:{}", address, port);
+                println!("## Niobium started on {address}:{port}");
             })
         }))
 }
@@ -268,13 +270,13 @@ async fn get_grid_item(uid: UID, gallery: &State<Gallery>, config: &State<Config
 /// Route handler that returns the thumbnail version of the requested UID
 #[get("/<uid>/thumbnail", rank = 3)]
 async fn get_thumbnail(uid: UID, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
-    get_resized(&uid, photos::ResizedType::THUMBNAIL, gallery, config).await
+    get_resized(&uid, photos::ResizedType::Thumbnail, gallery, config).await
 }
 
 /// Route handler that returns the large resized version of the requested UID
 #[get("/<uid>/large", rank = 4)]
 async fn get_large(uid: UID, gallery: &State<Gallery>, config: &State<Config>) -> PageResult {
-    get_resized(&uid, photos::ResizedType::LARGE, gallery, config).await
+    get_resized(&uid, photos::ResizedType::Large, gallery, config).await
 }
 
 /// Returns the resized version of the requested UID for the given prefix
@@ -305,10 +307,7 @@ async fn get_resized(
         }
         Ok(None) => page_404(config),
         Err(error) => {
-            eprintln!(
-                "Error : unable to return a resized photo for UID #{} : {}",
-                uid, error
-            );
+            eprintln!("Error : unable to return a resized photo for UID #{uid} : {error}");
             PageResult::Err(())
         }
     }
@@ -443,13 +442,13 @@ impl Display for Error {
             Error::InvalidRequestError(path) => {
                 write!(f, "invalid request : \"{}\"", path.display())
             }
-            Error::InvalidUIDError(uid) => write!(f, "invalid UID : \"{}\"", uid),
-            Error::UIDParserError(uid) => write!(f, "invalid UID format : \"{}\"", uid),
+            Error::InvalidUIDError(uid) => write!(f, "invalid UID : \"{uid}\""),
+            Error::UIDParserError(uid) => write!(f, "invalid UID format : \"{uid}\""),
             Error::FileError(error, path) => {
                 write!(f, "file error for \"{}\" : {}", path.display(), error)
             }
-            Error::TomlParserError(error) => write!(f, "TOML parser error : {}", error),
-            Error::DatabaseError(error) => write!(f, "database error : {}", error),
+            Error::TomlParserError(error) => write!(f, "TOML parser error : {error}"),
+            Error::DatabaseError(error) => write!(f, "database error : {error}"),
             Error::ImageError(error, path) => {
                 write!(f, "image error for \"{}\" : {}", path.display(), error)
             }
@@ -465,7 +464,7 @@ impl Display for Error {
                 path.display(),
                 error
             ),
-            Error::OtherError(error) => write!(f, "other error : {}", error),
+            Error::OtherError(error) => write!(f, "other error : {error}"),
         }
     }
 }

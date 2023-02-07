@@ -51,8 +51,8 @@ pub async fn init_schema(rocket: Rocket<Build>) -> fairing::Result {
                             if let Err(error) = query_result {
                                 println!();
                                 eprintln!("Error, unable to execute a query from schema.sql :");
-                                eprintln!("{}", sql_query);
-                                eprintln!("Result : {}", error);
+                                eprintln!("{sql_query}");
+                                eprintln!("Result : {error}");
                                 return Err(rocket);
                             }
                         }
@@ -61,7 +61,7 @@ pub async fn init_schema(rocket: Rocket<Build>) -> fairing::Result {
                     }
                     Err(error) => {
                         println!();
-                        eprintln!("Error, unable to open \"schema.sql\" : {}", error);
+                        eprintln!("Error, unable to open \"schema.sql\" : {error}");
                         Err(rocket)
                     }
                 }
@@ -69,7 +69,7 @@ pub async fn init_schema(rocket: Rocket<Build>) -> fairing::Result {
 
             // Something went wrong when checking `sqlite_master`, we'll have to scrub the launch
             Err(e) => {
-                eprintln!("Error, unable to access database to check schema : {}", e);
+                eprintln!("Error, unable to access database to check schema : {e}");
                 Err(rocket)
             }
         }
@@ -176,10 +176,7 @@ async fn get_photos_from_query<'q>(
             .filter_map(|row| -> Option<Photo> {
                 row_to_photo(row)
                     .map_err(|e| {
-                        eprintln!(
-                            "Warning : database error : unable to decode a photo : {}",
-                            e
-                        );
+                        eprintln!("Warning : database error : unable to decode a photo : {e}");
                         e
                     })
                     .map(|mut photo| {
