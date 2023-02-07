@@ -1,3 +1,5 @@
+[![CI](https://github.com/Foalyy/niobium/actions/workflows/ci.yml/badge.svg)](https://github.com/Foalyy/niobium/actions/workflows/ci.yml)
+
 # Niobium
 
 
