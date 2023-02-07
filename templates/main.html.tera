@@ -71,6 +71,9 @@
             </div>
             {% if config.SHOW_METADATA %}
                 <div class="loupe-metadata loupe-metadata-bottom invisible">
+                    {% if config.SHOW_FILENAME_IN_METADATA %}
+                        <div class="loupe-metadata-element hidden"><i class="fa-solid fa-image"></i> <span class="loupe-metadata-filename fw"></span></div>
+                    {% endif %}
                     <div class="loupe-metadata-element hidden"><i class="fa-solid fa-calendar-days fa-fw"></i> <span class="loupe-metadata-date"></span></div>
                     <div class="loupe-metadata-element hidden"><i class="fa-solid fa-map-marker-alt fa-fw"></i> <span class="loupe-metadata-place"></span></div>
                     <div class="loupe-metadata-element loupe-metadata-gear hidden"><i class="fa-solid fa-camera-retro fa-fw"></i> <span class="loupe-metadata-camera"></span> <span class="loupe-metadata-lens"></span></div>

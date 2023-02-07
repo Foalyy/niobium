@@ -650,6 +650,11 @@ impl Gallery {
         }
     }
 
+    fn is_photo_filename(&self, filename: &str) -> bool {
+        let filename = filename.to_lowercase();
+        !filename.starts_with('.') && (filename.ends_with(".jpg") || filename.ends_with(".jpeg"))
+    }
+
     // Private function used to load photos recursively
     #[allow(clippy::too_many_arguments)]
     fn load_rec<'a>(
@@ -726,12 +731,7 @@ impl Gallery {
                     let entry = entry.map_err(|e| Error::FileError(e, full_path.clone()))?;
                     if let Ok(file_type) = entry.file_type().await {
                         if let Ok(filename) = entry.file_name().into_string() {
-                            let filename_lowercase = filename.to_lowercase();
-                            if file_type.is_file()
-                                && !filename_lowercase.starts_with('.')
-                                && (filename_lowercase.ends_with(".jpg")
-                                    || filename_lowercase.ends_with(".jpeg"))
-                            {
+                            if file_type.is_file() && self.is_photo_filename(&filename) {
                                 filenames_in_fs.push(filename);
                             }
                         }
