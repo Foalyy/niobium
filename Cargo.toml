@@ -18,6 +18,7 @@ md-5 = "0.10.5"
 rand = "0.8.4"
 base64 = "0.13.1"
 natord = "1.0.9"
+regex = "1.8.4"
 
 [dependencies.rocket_dyn_templates]
 version = "0.1.0-rc.2"

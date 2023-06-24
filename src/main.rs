@@ -3,6 +3,7 @@
 #[macro_use]
 extern crate rocket;
 
+mod collection;
 mod config;
 mod db;
 mod nav_data;
@@ -27,12 +28,17 @@ use std::path::{Path, PathBuf};
 use std::{fmt::Display, io};
 use uid::UID;
 
+use crate::collection::Collections;
+
 #[launch]
 async fn rocket() -> _ {
     // Try to read the config file
     let config = Config::read_or_exit();
     let address = config.ADDRESS.clone();
     let port = config.PORT;
+
+    // Try to read the collections file
+    let collections = Collections::read_from_or_exit(config.COLLECTIONS_FILE.clone());
 
     // Send some of the settings to Rocket
     let figment = rocket::Config::figment()
@@ -80,6 +86,7 @@ async fn rocket() -> _ {
             db::init_schema,
         ))
         .manage(config)
+        .manage(collections)
         .manage(Gallery::new())
         .attach(AdHoc::try_on_ignite("Photos init", photos::init))
         .attach(AdHoc::on_liftoff("Startup message", move |_| {

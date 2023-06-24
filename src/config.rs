@@ -198,6 +198,11 @@ pub struct Config {
     #[serde(default = "config_default_resized_image_format")]
     pub RESIZED_IMAGE_FORMAT: ImageFormat,
 
+    /// Path to the config file that defines the list of collections
+    /// Default : "niobium_collections.config"
+    #[serde(default = "config_default_collections_file")]
+    pub COLLECTIONS_FILE: PathBuf,
+
     // Only for subdirs :
     /// If disabled, this directory will be ignored and no file inside it will be indexed.
     /// Default : true
@@ -423,6 +428,10 @@ fn config_default_dowload_prefix() -> String {
 
 fn config_default_loading_workers() -> usize {
     16
+}
+
+fn config_default_collections_file() -> PathBuf {
+    PathBuf::from("niobium_collections.config")
 }
 
 /// Try to open the .secret file in the app's directory and return
