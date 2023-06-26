@@ -1,3 +1,4 @@
+use crate::collection::Collections;
 use crate::config::Config;
 use crate::password::{self, OptionalPassword, PasswordError, Passwords};
 use crate::uid::UID;
@@ -315,6 +316,13 @@ impl Photo {
 
         Ok(resized_file_path)
     }
+
+    /// Return the file name of this photo prepended with its path inside the photos directory
+    pub fn path_with_filename(&self) -> PathBuf {
+        let mut path = self.path.clone();
+        path.push(self.filename.clone());
+        path
+    }
 }
 
 /// A photo stored in cache with extra metadata
@@ -325,14 +333,14 @@ pub struct CachedPhoto {
 }
 
 impl CachedPhoto {
-    fn new(photo: Photo, passwords: Vec<(String, String)>) -> Self {
+    pub fn new(photo: Photo, passwords: Vec<(String, String)>) -> Self {
         Self {
             photo: Arc::new(photo),
             passwords,
         }
     }
 
-    fn clone_from(photo: &CachedPhoto, passwords: Vec<(String, String)>) -> Self {
+    pub fn clone_from(photo: &CachedPhoto, passwords: Vec<(String, String)>) -> Self {
         Self {
             photo: Arc::clone(&photo.photo),
             passwords,
@@ -355,6 +363,7 @@ pub type GalleryContent = HashMap<String, Vec<CachedPhoto>>;
 pub struct Gallery {
     gallery: RwLock<GalleryContent>,
     photos: RwLock<HashMap<UID, CachedPhoto>>,
+    pub collections: RwLock<Collections>,
     subdirs: RwLock<HashMap<String, Subdirs>>,
     passwords: RwLock<HashMap<String, String>>,
     counts: RwLock<HashMap<String, HashMap<Vec<String>, usize>>>,
@@ -367,6 +376,7 @@ impl Gallery {
         Self {
             gallery: RwLock::new(HashMap::new()),
             photos: RwLock::new(HashMap::new()),
+            collections: RwLock::new(Collections::new()),
             subdirs: RwLock::new(HashMap::new()),
             passwords: RwLock::new(HashMap::new()),
             counts: RwLock::new(HashMap::new()),
@@ -383,9 +393,11 @@ impl Gallery {
     pub async fn clear(&self) {
         let mut gallery_lock = self.gallery.write().await;
         let mut photos_lock = self.photos.write().await;
+        let mut collections_lock = self.collections.write().await;
         let mut passwords_lock = self.passwords.write().await;
         gallery_lock.clear();
         photos_lock.clear();
+        collections_lock.clear();
         passwords_lock.clear();
     }
 
@@ -426,10 +438,18 @@ impl Gallery {
 
     /// Check if the given path exists in the gallery
     pub async fn path_exists(&self, path: &Path) -> bool {
-        self.gallery
-            .read()
-            .await
-            .contains_key(&path.to_string_lossy().to_string())
+        // Check if this path is inside a collection
+        let collections_read_lock = self.collections.read().await;
+        let gallery_read_lock = self.gallery.read().await;
+        let (collection, _, path_str) = collections_read_lock.find(path);
+
+        // Get the photos from the collection if found, or the main gallery otherwise
+        let photos = match collection {
+            Some(collection) => &collection.photos,
+            None => gallery_read_lock.deref(),
+        };
+
+        photos.contains_key(&path_str)
     }
 
     /// Insert the given photo in the gallery at the given path. If this photo is already registered in the gallery for a given path,
@@ -467,29 +487,45 @@ impl Gallery {
         uid: Option<UID>,
         provided_passwords: Passwords,
     ) -> Option<GalleryReadLock<'a>> {
-        let path = path.to_string_lossy().to_string();
-
+        // Check if this path is inside a collection
+        let collections_read_lock = self.collections.read().await;
         let gallery_read_lock = self.gallery.read().await;
-        if gallery_read_lock.contains_key(&path) {
-            // All photos available in this path (including some that may not be displayed to the user, if they
-            // require a password)
-            let photos = gallery_read_lock.get(&path).unwrap();
+        let (collection, collection_name, path_str) = collections_read_lock.find(path);
 
+        // Get the photos from the collection if found, or the main gallery otherwise.
+        // This includes all photos available in this path (including some that may not be displayed
+        // to the user, if they require a password).
+        let photos = match collection {
+            Some(collection) => collection.photos.get(&path_str),
+            None => gallery_read_lock.get(&path_str),
+        };
+
+        if let Some(photos) = photos {
             // Compute the number of available photos for the set of passwords provided
-            let mut n_photos = 0;
-            let counts_lock = self.counts.read().await;
-            let counts_in_path = counts_lock.get(&path).unwrap();
-            'loop_aggregates: for (required_passwords, count) in counts_in_path {
-                // Check that all required passwords for this count are provided
-                for password in required_passwords {
-                    if !provided_passwords.contains_key(password) {
-                        continue 'loop_aggregates;
-                    }
-                }
+            let n_photos = match collection_name {
+                // Subdir passwords are not supported for collections : simply return the number of photos found
+                Some(_) => photos.len(),
 
-                // Add to the total
-                n_photos += count;
-            }
+                // When requesting photos from the main gallery, compute the total number of photos based on
+                // the current set of passwords
+                None => {
+                    let mut n_photos = 0;
+                    let counts_lock = self.counts.read().await;
+                    let counts_in_path = counts_lock.get(&path_str).unwrap();
+                    'loop_aggregates: for (required_passwords, count) in counts_in_path {
+                        // Check that all required passwords for this count are provided
+                        for password in required_passwords {
+                            if !provided_passwords.contains_key(password) {
+                                continue 'loop_aggregates;
+                            }
+                        }
+
+                        // Add to the total
+                        n_photos += count;
+                    }
+                    n_photos
+                }
+            };
 
             // Compute pagination
             let mut start = start.unwrap_or(0);
@@ -514,10 +550,15 @@ impl Gallery {
                 max_count = 100;
             }
 
+            let read_lock = match collection_name {
+                Some(name) => PhotosGuard::CollectionGuard(collections_read_lock, name),
+                None => PhotosGuard::GalleryGuard(gallery_read_lock),
+            };
+
             // Return a read lock on the gallery that provides an iterator to access the photos
             Some(GalleryReadLock::new(
-                gallery_read_lock,
-                path,
+                read_lock,
+                path_str,
                 start,
                 max_count,
                 n_photos,
@@ -545,87 +586,100 @@ impl Gallery {
         cookies: &CookieJar<'_>,
         request_password: &OptionalPassword,
     ) -> Result<Passwords, PasswordError> {
-        // Get a lock on the gallery's password list
-        let gallery_passwords = self.passwords.read().await;
-
-        // Compute the list of user-provided passwords
-        let mut user_passwords = Passwords::new();
-        for (gallery_path, required_password) in gallery_passwords.deref() {
-            if let Some(provided_password) = cookies
-                .get_private(&password::cookie_name(gallery_path))
-                .map(|c| c.value().to_string())
-            {
-                if &provided_password == required_password {
-                    user_passwords.insert(gallery_path.clone(), provided_password);
-                }
+        // Check if this path is inside a collection
+        let collections_read_lock = self.collections.read().await;
+        let (collection, _, _) = collections_read_lock.find(path);
+        match collection {
+            Some(_collection) => {
+                // TODO : add support for passwords for collections
+                Ok(Passwords::new())
             }
-        }
+            None => {
+                // Get a lock on the gallery's password list
+                let gallery_passwords = self.passwords.read().await;
 
-        // Compute the list of required passwords to access this path
-        let mut required_passwords = Passwords::new();
-        let mut path_current = path.to_path_buf();
-        let empty_path = PathBuf::new();
-        while path_current != empty_path {
-            let path_current_str = path_current.to_string_lossy().to_string();
-            if let Some(password) = gallery_passwords.get(&path_current_str) {
-                required_passwords.insert(path_current_str, password.clone());
-            }
-            path_current.pop();
-        }
-        if let Some(password) = gallery_passwords.get("") {
-            required_passwords.insert("".to_string(), password.clone());
-        }
-        let mut paths_requiring_passwords = required_passwords.keys().collect::<Vec<&String>>();
-        paths_requiring_passwords.sort();
-
-        if required_passwords.is_empty() {
-            // No password required
-            Ok(user_passwords)
-        } else {
-            // At least one password is required, check all of them in order
-            for required_password_path in paths_requiring_passwords {
-                let required_password = required_passwords.get(required_password_path).unwrap();
-
-                // Check if a matching password was provided through the request guard (the Authorization header)
-                if let Some(user_provided_password) = request_password.as_string() {
-                    // Check if the password matches
-                    if user_provided_password == required_password {
-                        // It does : save it in the session cookies
-                        cookies.add_private(Cookie::new(
-                            password::cookie_name(required_password_path),
-                            user_provided_password.clone(),
-                        ));
-                        user_passwords.insert(
-                            required_password_path.clone(),
-                            user_provided_password.clone(),
-                        );
-
-                        // Jump to the next required password in the list, if any
-                        continue;
+                // Compute the list of user-provided passwords
+                let mut user_passwords = Passwords::new();
+                for (gallery_path, required_password) in gallery_passwords.deref() {
+                    if let Some(provided_password) = cookies
+                        .get_private(&password::cookie_name(gallery_path))
+                        .map(|c| c.value().to_string())
+                    {
+                        if &provided_password == required_password {
+                            user_passwords.insert(gallery_path.clone(), provided_password);
+                        }
                     }
                 }
 
-                // Check if there is a valid password in the session cookies
-                if let Some(user_password) = user_passwords.get(required_password_path) {
-                    // Check if the password matches
-                    if user_password == required_password {
-                        // It matches : jump to the next required password in the list, if any
-                        continue;
-                    } else {
-                        // It doesn't match : return "invalid password"
-                        return Err(PasswordError::Invalid(required_password_path.clone()));
+                // Compute the list of required passwords to access this path
+                let mut required_passwords = Passwords::new();
+                let mut path_current = path.to_path_buf();
+                let empty_path = PathBuf::new();
+                while path_current != empty_path {
+                    let path_current_str = path_current.to_string_lossy().to_string();
+                    if let Some(password) = gallery_passwords.get(&path_current_str) {
+                        required_passwords.insert(path_current_str, password.clone());
                     }
-                } else if request_password.as_string().is_some() {
-                    // An invalid password was provided in the current request : return "invalid password"
-                    return Err(PasswordError::Invalid(required_password_path.clone()));
+                    path_current.pop();
+                }
+                if let Some(password) = gallery_passwords.get("") {
+                    required_passwords.insert("".to_string(), password.clone());
+                }
+                let mut paths_requiring_passwords =
+                    required_passwords.keys().collect::<Vec<&String>>();
+                paths_requiring_passwords.sort();
+
+                if required_passwords.is_empty() {
+                    // No password required
+                    Ok(user_passwords)
                 } else {
-                    // No password found in the request or the session cookies : return "password required"
-                    return Err(PasswordError::Required(required_password_path.clone()));
+                    // At least one password is required, check all of them in order
+                    for required_password_path in paths_requiring_passwords {
+                        let required_password =
+                            required_passwords.get(required_password_path).unwrap();
+
+                        // Check if a matching password was provided through the request guard (the Authorization header)
+                        if let Some(user_provided_password) = request_password.as_string() {
+                            // Check if the password matches
+                            if user_provided_password == required_password {
+                                // It does : save it in the session cookies
+                                cookies.add_private(Cookie::new(
+                                    password::cookie_name(required_password_path),
+                                    user_provided_password.clone(),
+                                ));
+                                user_passwords.insert(
+                                    required_password_path.clone(),
+                                    user_provided_password.clone(),
+                                );
+
+                                // Jump to the next required password in the list, if any
+                                continue;
+                            }
+                        }
+
+                        // Check if there is a valid password in the session cookies
+                        if let Some(user_password) = user_passwords.get(required_password_path) {
+                            // Check if the password matches
+                            if user_password == required_password {
+                                // It matches : jump to the next required password in the list, if any
+                                continue;
+                            } else {
+                                // It doesn't match : return "invalid password"
+                                return Err(PasswordError::Invalid(required_password_path.clone()));
+                            }
+                        } else if request_password.as_string().is_some() {
+                            // An invalid password was provided in the current request : return "invalid password"
+                            return Err(PasswordError::Invalid(required_password_path.clone()));
+                        } else {
+                            // No password found in the request or the session cookies : return "password required"
+                            return Err(PasswordError::Required(required_password_path.clone()));
+                        }
+                    }
+
+                    // All passwords have been provided
+                    Ok(user_passwords)
                 }
             }
-
-            // All passwords have been provided
-            Ok(user_passwords)
         }
     }
 
@@ -1286,18 +1340,38 @@ impl Gallery {
         self.update_counts().await;
 
         // Apply REVERSE_SORT_ORDER to the gallery
-        let mut gallery_lock = self.gallery.write().await;
-        let subdirs_configs_lock = self.subdirs_configs.read().await;
-        for (path, config) in subdirs_configs_lock.deref() {
-            if config.REVERSE_SORT_ORDER {
-                if let Some(ref mut photos) = gallery_lock.get_mut(path) {
-                    photos.reverse();
+        {
+            let mut gallery_lock = self.gallery.write().await;
+            let subdirs_configs_lock = self.subdirs_configs.read().await;
+            for (path, config) in subdirs_configs_lock.deref() {
+                if config.REVERSE_SORT_ORDER {
+                    if let Some(ref mut photos) = gallery_lock.get_mut(path) {
+                        photos.reverse();
+                    }
                 }
             }
         }
 
+        // Sort the photos into collections
+        println!("Indexing collections...");
+        self.load_collections(config).await;
+
         // Good job.
         Ok(())
+    }
+
+    /// Load the list of collections from the dedicated config file and fill them with the photos from the gallery
+    async fn load_collections(&self, config: &Config) {
+        // Try to read the collections config file
+        if let Some(mut collections) = Collections::try_read_from(config.COLLECTIONS_FILE.clone()) {
+            // Fill the collections with photos from this gallery
+            let gallery_lock = self.gallery.read().await;
+            collections.fill(gallery_lock.deref());
+
+            // Save the collections into the gallery
+            let mut collections_lock = self.collections.write().await;
+            collections_lock.replace_with(collections);
+        }
     }
 
     /// Recalculate the internal `counts` data structure based on the current `gallery` : for each path,
@@ -1357,19 +1431,46 @@ impl Gallery {
 
     // Return the list of known non-hidden subdirectories for the given path
     pub async fn get_subdirs(&self, path: &Path, always_include: Option<&String>) -> Vec<String> {
-        let subdirs_lock = self.subdirs.read().await;
-        if let Some(subdirs) = subdirs_lock.get(&path.to_string_lossy().to_string()) {
-            let mut subdirs = subdirs.list_visible();
-            if let Some(always_include) = always_include {
-                if !subdirs.contains_name(always_include) {
-                    subdirs.push(Subdir::new(always_include.clone(), false));
+        // Check if this path is inside a collection
+        let collections_read_lock = self.collections.read().await;
+        let (collection, _, path_str) = collections_read_lock.find(path);
+        match collection {
+            Some(collection) => {
+                // Get the list of subdirs relative to this path in the collection
+                let collection_path = PathBuf::from(path_str);
+                let mut subdirs = Vec::new();
+                for key in collection.photos.keys() {
+                    let key_path = PathBuf::from(key);
+                    if let Ok(key_path) = key_path.strip_prefix(&collection_path) {
+                        if let Some(std::path::Component::Normal(dir)) =
+                            key_path.components().next()
+                        {
+                            let dir = dir.to_string_lossy().to_string();
+                            if !subdirs.contains(&dir) {
+                                subdirs.push(dir);
+                            }
+                        }
+                    }
+                }
+                subdirs.sort_unstable();
+                subdirs
+            }
+            None => {
+                let subdirs_lock = self.subdirs.read().await;
+                if let Some(subdirs) = subdirs_lock.get(&path.to_string_lossy().to_string()) {
+                    let mut subdirs = subdirs.list_visible();
+                    if let Some(always_include) = always_include {
+                        if !subdirs.contains_name(always_include) {
+                            subdirs.push(Subdir::new(always_include.clone(), false));
+                        }
+                    }
+                    subdirs.sort();
+                    subdirs.list_names_visible_owned()
+                } else {
+                    // This path is not found, return an empty list
+                    Vec::new()
                 }
             }
-            subdirs.sort();
-            subdirs.list_names_visible_owned()
-        } else {
-            // This path is not found, return an empty list
-            Vec::new()
         }
     }
 
@@ -1379,11 +1480,28 @@ impl Gallery {
     }
 }
 
-/// RAII read lock on the gallery, obtained with `Gallery::read()`. Every access on the gellery's photos
+#[derive(Debug)]
+enum PhotosGuard<'a> {
+    GalleryGuard(RwLockReadGuard<'a, GalleryContent>),
+    CollectionGuard(RwLockReadGuard<'a, Collections>, String),
+}
+
+impl<'a> PhotosGuard<'a> {
+    fn get(&self, path: &str) -> Option<&Vec<CachedPhoto>> {
+        match self {
+            PhotosGuard::GalleryGuard(guard) => guard.get(path),
+            PhotosGuard::CollectionGuard(guard, collection_name) => {
+                guard.get(collection_name).and_then(|c| c.photos.get(path))
+            }
+        }
+    }
+}
+
+/// RAII read lock on the gallery, obtained with `Gallery::read()`. Every access on the gallery's photos
 /// must pass through an instance of this lock. Concurrent reads are allowed, which means access will
 /// be immediately granted as long as the gallery is not reloading.
 pub struct GalleryReadLock<'a> {
-    guard: RwLockReadGuard<'a, GalleryContent>,
+    guard: PhotosGuard<'a>,
     path: String,
     pub start: usize,
     pub max_count: usize,
@@ -1393,7 +1511,7 @@ pub struct GalleryReadLock<'a> {
 
 impl<'a> GalleryReadLock<'a> {
     fn new(
-        guard: RwLockReadGuard<'a, GalleryContent>,
+        guard: PhotosGuard<'a>,
         path: String,
         start: usize,
         max_count: usize,

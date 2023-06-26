@@ -1,6 +1,7 @@
 use rocket::serde::Serialize;
 use std::path::{Component, Path, PathBuf};
 
+use crate::config::Config;
 use crate::password::Passwords;
 use crate::photos::Gallery;
 use crate::Error;
@@ -8,6 +9,7 @@ use crate::Error;
 /// Data used to fill the template for the navigation panel
 #[derive(Serialize, Debug, Default)]
 pub struct NavData {
+    title: String,
     is_root: bool,
     url_path_root: String,
     current: String,
@@ -61,14 +63,36 @@ impl NavData {
     pub async fn from_path(
         path: &Path,
         gallery: &Gallery,
+        config: &Config,
         provided_passwords: Option<Passwords>,
     ) -> Result<Self, Error> {
+        // If this path is inside a collection, keep only the path relative to the
+        // root of the collection
+        let collections_read_lock = gallery.collections.read().await;
+        let (collection, collection_name, _) = collections_read_lock.find(path);
+
+        // Title
+        let title = collection
+            .and_then(|c| c.title.clone())
+            .unwrap_or(config.TITLE.clone());
+
+        // Compute the main parameters for the nav panel
+        let path_root = match &collection_name {
+            Some(collection_name) => PathBuf::from("/").join(PathBuf::from(collection_name)),
+            None => PathBuf::from("/"),
+        };
         let mut path_current = path.to_path_buf();
         let mut path_parent = path_current.parent().map(|p| p.to_path_buf());
-        let path_navigate_up = path_parent.clone().map(|p| p.to_path_buf());
+        if let Some(collection_name) = &collection_name {
+            if path_current == PathBuf::from(collection_name) {
+                // We are at the root of a collection
+                path_parent = None;
+            }
+        }
+        let path_navigate_up = path_parent.clone();
         let mut is_root = path_parent.is_none();
         let mut path_split = path_current.split();
-        let path_split_open = path_split.clone();
+        let mut path_split_open = path_split.clone();
         let mut current = path_split
             .last()
             .cloned()
@@ -117,7 +141,7 @@ impl NavData {
 
         // Generate URIs for the breadcrumbs at the top of the panel
         let mut subdir_path = PathBuf::from("/");
-        let path_split_open_with_urls = path_split_open
+        let mut path_split_open_with_urls: Vec<(String, String)> = path_split_open
             .iter()
             .map(|s| {
                 subdir_path.push(s);
@@ -154,9 +178,17 @@ impl NavData {
             }
         }
 
+        // If we are in a collection, remove its name from the breadcrumbs to show it as the root
+        if collection_name.is_some() {
+            path_split.remove(0);
+            path_split_open.remove(0);
+            path_split_open_with_urls.remove(0);
+        }
+
         Ok(Self {
+            title,
             is_root,
-            url_path_root: uri!(crate::get_gallery(PathBuf::from("/"))).to_string(),
+            url_path_root: uri!(crate::get_gallery(path_root)).to_string(),
             current,
             current_open,
             path_current: path_current.clone(),

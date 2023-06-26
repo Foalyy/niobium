@@ -28,17 +28,12 @@ use std::path::{Path, PathBuf};
 use std::{fmt::Display, io};
 use uid::UID;
 
-use crate::collection::Collections;
-
 #[launch]
 async fn rocket() -> _ {
     // Try to read the config file
     let config = Config::read_or_exit();
     let address = config.ADDRESS.clone();
     let port = config.PORT;
-
-    // Try to read the collections file
-    let collections = Collections::read_from_or_exit(config.COLLECTIONS_FILE.clone());
 
     // Send some of the settings to Rocket
     let figment = rocket::Config::figment()
@@ -86,7 +81,6 @@ async fn rocket() -> _ {
             db::init_schema,
         ))
         .manage(config)
-        .manage(collections)
         .manage(Gallery::new())
         .attach(AdHoc::try_on_ignite("Photos init", photos::init))
         .attach(AdHoc::on_liftoff("Startup message", move |_| {
@@ -113,8 +107,8 @@ async fn get_gallery(
         Ok(_) => {
             // Check if this path exists
             if gallery.path_exists(&path).await {
-                // This path exists in the gallery, calculate the content of the nav panel
-                match NavData::from_path(&path, gallery, None).await {
+                // This path exists in the gallery or in a collection, calculate the content of the nav panel
+                match NavData::from_path(&path, gallery, config, None).await {
                     // Render the template
                     Ok(nav_data) => PageResult::Page(Template::render(
                         "main",
@@ -232,7 +226,7 @@ async fn get_nav(
     // Check if a password is required to access this path
     match gallery.check_password(&path, cookies, &password).await {
         // Either no password is required or a valid one has been provided
-        Ok(passwords) => match NavData::from_path(&path, gallery, Some(passwords)).await {
+        Ok(passwords) => match NavData::from_path(&path, gallery, config, Some(passwords)).await {
             Ok(nav_data) => PageResult::Page(Template::render(
                 "nav",
                 context! {

@@ -1,5 +1,5 @@
 <div class="navigation-panel-content">
-    {% if config.TITLE %}<div class="navigation-panel-title">{{ config.TITLE }}</div>{% endif %}
+    {% if nav.title %}<div class="navigation-panel-title"><a class="nav-link" href="{{ nav.url_path_root | safe }}" data-load-url="{{ nav.url_path_root | safe }}?grid" data-nav-url="{{ nav.url_path_root | safe }}?nav">{{ nav.title }}</a></div>{% endif %}
     <div class="navigation-panel-current-path">
         {% if nav.path_split_open %}
             {% for dir in nav.path_split_open_with_urls %}
