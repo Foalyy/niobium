@@ -253,8 +253,11 @@ pub struct CollectionDir {
     )]
     pub filter: Option<CollectionFilter>,
 
-    #[serde(default)]
-    pub inverse_filter: bool,
+    #[serde(
+        deserialize_with = "collection_filter_deserialize",
+        default = "collection_dir_filter_default"
+    )]
+    pub filter_exclude: Option<CollectionFilter>,
 }
 
 impl CollectionDir {
@@ -265,14 +268,18 @@ impl CollectionDir {
 
     /// Check if the given photo should be included in this collection
     pub fn photo_matches(&self, photo: &CachedPhoto) -> bool {
-        let regex_matches = self
+        let filter_matches = self
             .filter
             .as_ref()
             .map(|filter| filter.matches(photo))
             .unwrap_or(true);
-        match self.inverse_filter {
-            true => !regex_matches,
-            false => regex_matches,
+        match filter_matches {
+            true => !self
+                .filter_exclude
+                .as_ref()
+                .map(|filter| filter.matches(photo))
+                .unwrap_or(false),
+            false => false,
         }
     }
 }
