@@ -1,0 +1,9 @@
+[[collection]]
+NAME = "MyCollection"
+TITLE = "Some photos"
+# HIDDEN = true
+# PASSWORD = ""
+DIRS = [
+    # FILTER and FILTER_EXCLUDE are optional and can be deleted if not needed
+    { PATH = "path/to/my/photos", FILTER = "", FILTER_EXCLUDE = "" },
+]
