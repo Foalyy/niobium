@@ -315,7 +315,17 @@ body.nav-open {
     opacity: 0;
 }
 
-.navigation-panel-subdirs {
+.navigation-panel-collections-title {
+    margin-top: 2rem;
+    margin-left: 1rem;
+    color: #B0B0B0A0;
+    font-weight: bold;
+    font-style: italic;
+    text-align: center;
+}
+
+.navigation-panel-subdirs,
+.navigation-panel-collections {
     list-style: none;
     margin-top: 0.5rem;
     margin-left: 1rem;
@@ -324,21 +334,24 @@ body.nav-open {
     overflow-y: auto;
 }
 
-.navigation-panel-subdirs .fa-solid {
-    padding-right: 0.5rem;
+.navigation-panel-subdirs .fa-solid,
+.navigation-panel-collections .fa-images {
+    padding-right: 0.7rem;
 }
 
 .navigation-panel-subdir-current {
     margin-left: 1rem;
 }
 
-.navigation-panel-subdir {
+.navigation-panel-subdir,
+.navigation-panel-collection {
     margin-left: 0.75rem;
 }
 
 .navigation-panel-subdir-parent a,
 .navigation-panel-subdir-current a,
-.navigation-panel-subdir a {
+.navigation-panel-subdir a,
+.navigation-panel-collection a {
     position: relative;
     padding-left: 0;
     padding-top: 0.5em;

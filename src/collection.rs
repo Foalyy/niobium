@@ -16,7 +16,6 @@ use crate::{
 
 /// A list of Collection's, as deserialized from the dedicated TOML config file
 #[derive(Deserialize, Default, Debug)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub struct Collections {
     #[serde(default = "collections_default_empty_collections")]
     collections: Vec<Collection>,
@@ -33,7 +32,15 @@ impl Collections {
 
     /// Get the collection with the given name, if any
     pub fn get(&self, name: &str) -> Option<&Collection> {
-        self.collections.get(*self.index.get(name).unwrap())
+        self.collections.get(*self.index.get(name)?)
+    }
+
+    /// Get the list of names of all collections that are not hidden
+    pub fn list(&self) -> Vec<&Collection> {
+        self.collections
+            .iter()
+            .filter(|&collection| !collection.hidden)
+            .collect()
     }
 
     /// Find a collection that relates to the given path (meaning that the path starts
@@ -163,8 +170,16 @@ impl<'a> IntoIterator for &'a Collections {
 pub struct Collection {
     #[serde(deserialize_with = "collection_name_deserialize")]
     pub name: String,
+
+    #[serde(default)]
     pub title: Option<String>,
+
+    #[serde(default)]
     pub password: Option<String>,
+
+    #[serde(default)]
+    pub hidden: bool,
+
     pub dirs: Vec<CollectionDir>,
 
     #[serde(skip)]

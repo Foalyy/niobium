@@ -107,6 +107,11 @@ pub struct Config {
     #[serde(default = "config_default_true")]
     pub OPEN_NAVIGATION_PANEL_BY_DEFAULT: bool,
 
+    /// If enabled, the available collections will be displayed in the navigation panel.
+    /// Default : true
+    #[serde(default = "config_default_true")]
+    pub SHOW_COLLECTIONS_IN_NAVIGATION_PANEL: bool,
+
     /// Fields(s) to use to sort the photos being displayed. This can be a single field or a
     /// comma-separated list of fields for multi-ordering. Available fields : `id`,
     /// `filename`, `title`, `date_taken`, `sort_order`.

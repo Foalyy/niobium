@@ -28,6 +28,8 @@ pub struct NavData {
     open_subdir: Option<String>,
     locked_subdirs: Vec<String>,
     unlocked_subdirs: Vec<String>,
+    in_collection: bool,
+    collections_with_urls: Vec<(String, String)>,
 }
 
 trait Split {
@@ -185,6 +187,25 @@ impl NavData {
             path_split_open_with_urls.remove(0);
         }
 
+        // Compile the list of collections with their URIs
+        let collections_with_urls: Vec<(String, String)> = match config
+            .SHOW_COLLECTIONS_IN_NAVIGATION_PANEL
+        {
+            true => {
+                let collections = collections_read_lock.list();
+                collections
+                    .iter()
+                    .map(|&collection| {
+                        (
+                            collection.title.clone().unwrap_or(collection.name.clone()),
+                            uri!(crate::get_gallery(PathBuf::from(&collection.name))).to_string(),
+                        )
+                    })
+                    .collect()
+            }
+            false => Vec::new(),
+        };
+
         Ok(Self {
             title,
             is_root,
@@ -205,6 +226,8 @@ impl NavData {
             open_subdir,
             locked_subdirs,
             unlocked_subdirs,
+            in_collection: collection_name.is_some(),
+            collections_with_urls,
         })
     }
 }

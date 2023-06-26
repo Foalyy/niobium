@@ -29,4 +29,12 @@
             <li class="navigation-panel-no-subdirs">No subdirectories</li>
         {% endfor %}
     </ul>
+    {% if nav.is_root and not nav.in_collection and nav.collections_with_urls %}
+        <div class="navigation-panel-collections-title"><i class="fa-solid fa-minus"></i> Collections <i class="fa-solid fa-minus"></i></div>
+        <ul class="navigation-panel-collections">
+            {% for collection in nav.collections_with_urls %}
+                <li class="navigation-panel-collection"><a class="nav-link" href="{{ collection.1 | safe }}" data-load-url="{{ collection.1 | safe }}?grid" data-nav-url="{{ collection.1 | safe }}?nav"><i class="fa-solid fa-images fa-fw"></i> {{ collection.0 }}</a></li>
+            {% endfor %}
+        </ul>
+    {% endif %}
 </div>
