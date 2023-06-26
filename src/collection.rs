@@ -17,7 +17,10 @@ use crate::{
 /// A list of Collection's, as deserialized from the dedicated TOML config file
 #[derive(Deserialize, Default, Debug)]
 pub struct Collections {
-    #[serde(default = "collections_default_empty_collections")]
+    #[serde(
+        default = "collections_default_empty_collections",
+        rename = "collection"
+    )]
     collections: Vec<Collection>,
 
     #[serde(skip)]
