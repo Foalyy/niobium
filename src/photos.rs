@@ -586,32 +586,37 @@ impl Gallery {
         cookies: &CookieJar<'_>,
         request_password: &OptionalPassword,
     ) -> Result<Passwords, PasswordError> {
-        // Check if this path is inside a collection
+        // Get a lock on the gallery's password list
+        let gallery_passwords = self.passwords.read().await;
+
+        // Compute the list of user-provided passwords
+        let mut user_passwords = Passwords::new();
+        for (gallery_path, required_password) in gallery_passwords.deref() {
+            if let Some(provided_password) = cookies
+                .get_private(&password::cookie_name(gallery_path))
+                .map(|c| c.value().to_string())
+            {
+                if &provided_password == required_password {
+                    user_passwords.insert(gallery_path.clone(), provided_password);
+                }
+            }
+        }
+
+        // Compute the list of required passwords to access this path
         let collections_read_lock = self.collections.read().await;
         let (collection, _, _) = collections_read_lock.find(path);
-        match collection {
-            Some(_collection) => {
-                // TODO : add support for passwords for collections
-                Ok(Passwords::new())
+        let required_passwords = match collection {
+            Some(collection) => {
+                // For collections, only a global password in the collections config file is supported,
+                // subdir-specific passwords are ignored
+                let mut required_passwords = Passwords::new();
+                if let Some(password) = &collection.password {
+                    required_passwords.insert(collection.name.clone(), password.clone());
+                }
+                required_passwords
             }
             None => {
-                // Get a lock on the gallery's password list
-                let gallery_passwords = self.passwords.read().await;
-
-                // Compute the list of user-provided passwords
-                let mut user_passwords = Passwords::new();
-                for (gallery_path, required_password) in gallery_passwords.deref() {
-                    if let Some(provided_password) = cookies
-                        .get_private(&password::cookie_name(gallery_path))
-                        .map(|c| c.value().to_string())
-                    {
-                        if &provided_password == required_password {
-                            user_passwords.insert(gallery_path.clone(), provided_password);
-                        }
-                    }
-                }
-
-                // Compute the list of required passwords to access this path
+                // For the main gallery, check all the components in the path to look for required passwords
                 let mut required_passwords = Passwords::new();
                 let mut path_current = path.to_path_buf();
                 let empty_path = PathBuf::new();
@@ -625,61 +630,60 @@ impl Gallery {
                 if let Some(password) = gallery_passwords.get("") {
                     required_passwords.insert("".to_string(), password.clone());
                 }
-                let mut paths_requiring_passwords =
-                    required_passwords.keys().collect::<Vec<&String>>();
-                paths_requiring_passwords.sort();
+                required_passwords
+            }
+        };
+        let mut paths_requiring_passwords = required_passwords.keys().collect::<Vec<&String>>();
+        paths_requiring_passwords.sort();
 
-                if required_passwords.is_empty() {
-                    // No password required
-                    Ok(user_passwords)
-                } else {
-                    // At least one password is required, check all of them in order
-                    for required_password_path in paths_requiring_passwords {
-                        let required_password =
-                            required_passwords.get(required_password_path).unwrap();
+        if required_passwords.is_empty() {
+            // No password required
+            Ok(user_passwords)
+        } else {
+            // At least one password is required, check all of them in order
+            for required_password_path in paths_requiring_passwords {
+                let required_password = required_passwords.get(required_password_path).unwrap();
 
-                        // Check if a matching password was provided through the request guard (the Authorization header)
-                        if let Some(user_provided_password) = request_password.as_string() {
-                            // Check if the password matches
-                            if user_provided_password == required_password {
-                                // It does : save it in the session cookies
-                                cookies.add_private(Cookie::new(
-                                    password::cookie_name(required_password_path),
-                                    user_provided_password.clone(),
-                                ));
-                                user_passwords.insert(
-                                    required_password_path.clone(),
-                                    user_provided_password.clone(),
-                                );
+                // Check if a matching password was provided through the request guard (the Authorization header)
+                if let Some(user_provided_password) = request_password.as_string() {
+                    // Check if the password matches
+                    if user_provided_password == required_password {
+                        // It does : save it in the session cookies
+                        cookies.add_private(Cookie::new(
+                            password::cookie_name(required_password_path),
+                            user_provided_password.clone(),
+                        ));
+                        user_passwords.insert(
+                            required_password_path.clone(),
+                            user_provided_password.clone(),
+                        );
 
-                                // Jump to the next required password in the list, if any
-                                continue;
-                            }
-                        }
-
-                        // Check if there is a valid password in the session cookies
-                        if let Some(user_password) = user_passwords.get(required_password_path) {
-                            // Check if the password matches
-                            if user_password == required_password {
-                                // It matches : jump to the next required password in the list, if any
-                                continue;
-                            } else {
-                                // It doesn't match : return "invalid password"
-                                return Err(PasswordError::Invalid(required_password_path.clone()));
-                            }
-                        } else if request_password.as_string().is_some() {
-                            // An invalid password was provided in the current request : return "invalid password"
-                            return Err(PasswordError::Invalid(required_password_path.clone()));
-                        } else {
-                            // No password found in the request or the session cookies : return "password required"
-                            return Err(PasswordError::Required(required_password_path.clone()));
-                        }
+                        // Jump to the next required password in the list, if any
+                        continue;
                     }
+                }
 
-                    // All passwords have been provided
-                    Ok(user_passwords)
+                // Check if there is a valid password in the session cookies
+                if let Some(user_password) = user_passwords.get(required_password_path) {
+                    // Check if the password matches
+                    if user_password == required_password {
+                        // It matches : jump to the next required password in the list, if any
+                        continue;
+                    } else {
+                        // It doesn't match : return "invalid password"
+                        return Err(PasswordError::Invalid(required_password_path.clone()));
+                    }
+                } else if request_password.as_string().is_some() {
+                    // An invalid password was provided in the current request : return "invalid password"
+                    return Err(PasswordError::Invalid(required_password_path.clone()));
+                } else {
+                    // No password found in the request or the session cookies : return "password required"
+                    return Err(PasswordError::Required(required_password_path.clone()));
                 }
             }
+
+            // All passwords have been provided
+            Ok(user_passwords)
         }
     }
 
@@ -1367,6 +1371,16 @@ impl Gallery {
             // Fill the collections with photos from this gallery
             let gallery_lock = self.gallery.read().await;
             collections.fill(gallery_lock.deref());
+
+            // Register the passwords of the collection that have some
+            for collection in &collections {
+                if let Some(password) = &collection.password {
+                    self.passwords
+                        .write()
+                        .await
+                        .insert(collection.name.clone(), password.clone());
+                }
+            }
 
             // Save the collections into the gallery
             let mut collections_lock = self.collections.write().await;

@@ -3,6 +3,7 @@ use std::{
     fs,
     io::ErrorKind,
     path::{Path, PathBuf},
+    slice::Iter,
 };
 
 use regex::Regex;
@@ -14,7 +15,7 @@ use crate::{
 };
 
 /// A list of Collection's, as deserialized from the dedicated TOML config file
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Default, Debug)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub struct Collections {
     #[serde(default = "collections_default_empty_collections")]
@@ -27,10 +28,7 @@ pub struct Collections {
 impl Collections {
     /// Create a new, empty collections list
     pub fn new() -> Self {
-        Self {
-            collections: Vec::new(),
-            index: HashMap::new(),
-        }
+        Self::default()
     }
 
     /// Get the collection with the given name, if any
@@ -148,6 +146,16 @@ fn collections_default_empty_collections() -> Vec<Collection> {
     vec![]
 }
 
+/// When requesting an iterator on the Collections, iterate over the internal vector of Collection's
+impl<'a> IntoIterator for &'a Collections {
+    type Item = &'a Collection;
+    type IntoIter = Iter<'a, Collection>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.collections.iter()
+    }
+}
+
 /// A curated collection of photos from the global gallery
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
@@ -156,6 +164,7 @@ pub struct Collection {
     #[serde(deserialize_with = "collection_name_deserialize")]
     pub name: String,
     pub title: Option<String>,
+    pub password: Option<String>,
     pub dirs: Vec<CollectionDir>,
 
     #[serde(skip)]
