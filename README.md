@@ -25,7 +25,8 @@
   - [2.1/ Main config file](#spiral_notepad-21-main-config-file)
   - [2.2/ Subdirectories config files](#open_file_folder-22-subdirectories-config-files)
 - [3/ Reloading](#arrows_counterclockwise-3-reloading)
-- [4/ Acknowledgements](#handshake-4-acknowledgements)
+- [4/ Collections](#framed_picture-4-collections)
+- [5/ Acknowledgements](#handshake-5-acknowledgements)
 
 ## :hammer_and_wrench: 1/ Installation
 
@@ -286,6 +287,10 @@ SHOW_NAVIGATION_PANEL = true
 # Default : true
 OPEN_NAVIGATION_PANEL_BY_DEFAULT = true
 
+# If enabled, the available collections will be displayed in the navigation panel.
+# Default : true
+SHOW_COLLECTIONS_IN_NAVIGATION_PANEL = true
+
 
 ## User interface
 
@@ -367,6 +372,10 @@ LARGE_VIEW_QUALITY = 85 # %
 # Default : WEBP
 RESIZED_IMAGE_FORMAT = "WEBP"
 
+# Path to the config file that defines the list of collections
+# Default : "niobium_collections.config"
+COLLECTIONS_FILE = "niobium_collections.config"
+
 
 
 ## Settings only available for subdirectories
@@ -405,7 +414,69 @@ When the app launches, the photos index is cached in memory to improve performan
 This will *not* reload the main configuration file, but it *will* reload the `.niobium.config` configuration files in your photos folder.
 
 
-## :handshake: 4/ Acknowledgements
+## :framed_picture: 4/ Collections
+
+Niobium supports *collections*, which are another interesting way to organize and display your galleries of photos.
+
+Collections are defined by a name and one or more directories with, optionally, regex filters for each one. Every time the gallery is (re)loaded, the collections are reindexed with the photos in the gallery that match their specific set of requirements (directories and filters). The structure of the subdirectories inside the indexed directories is preserved. A collection is accessed by appending its name to the main URL, like a virtual folder at the root of the gallery.
+
+Unlike the main config file, the collections config file is reloaded when `.reload` is called, therefore Niobium doesn't need to be restarted when creating or modifying collections.
+
+Note that subdirectories-specific passwords are not supported inside collections : collections will allow access to subdirectories that are password-protected in the main gallery. If this is not desired, sensitive subdirectories should be filtered out of the collection with the `FILTER_EXCLUDE` setting. It is possible, however, to set a global password on a collection with the `PASSWORD` setting in the definition of the collection (see below).
+
+By default, the list of collections is displayed in the navigation panel when the URL points to the root of the gallery. This can be disabled through the `SHOW_COLLECTIONS_IN_NAVIGATION_PANEL` setting in the main config. Individual collections can also be hidden through the optional `HIDDEN` setting (see below).
+
+The list of collections is defined in a dedicated configuration file, controlled by the `COLLECTIONS_FILE` parameter in the main config, which by default points to `niobium_collections.config`. The definition of a collection starts with `[[collection]]` followed by some settings :
+- `NAME` _(mandatory)_ : the name of the collection, used in the URL. Only alphanumeric characters, dashes and underscores are allowed.
+- `TITLE` _(optional)_ : the title of the collection, displayed in the navbar. If missing, `NAME` is used instead.
+- `PASSWORD` _(optional)_ : an optional password required to access the collection.
+- `HIDDEN` _(optional)_ : hide this collection from the navigation panel.
+- `DIRS` _(mandatory)_ : the list of directories that should be included in this collection, each with the following settings :
+  - `PATH` _(mandatory)_ : the path of the directory to include, relative to the root of the gallery (the `photos` folder). Set to `""` to refer to include all photos in the gallery.
+  - `FILTER` _(optional)_ : if specified, only the photos matching this regex will be included. The expression is checked against the full path of each photo, relative to the root of the gallery.
+  - `FILTER_EXCLUDE` _(optional)_ : if specified, each photo that should be included according to `FILTER` (ie all photos in this directory if `FILTER` is not set) is also checked against this filter which, if it matches, excludes the photo. This can be used to simplify the main filtering regex.
+
+The syntax for the regex's can be found here : https://docs.rs/regex/latest/regex/#syntax. Remember that backslashes are used to escape characters from the configuration string, so to put an escaping backslash in the regex, you need to write two of them, for instance "`\\d`" -- and if you need to match against an actual, literal backslash, you need to write "`\\\\`". [I know, I know](https://xkcd.com/1638/).
+
+### Example
+
+`niobium_collections.config`
+
+```
+[[collection]]
+NAME = "BestOf2022"
+TITLE = "Best photos of 2022"
+DIRS = [
+    { PATH = "2022/", FILTER = "\\/BestOf\\/", FILTER_EXCLUDE = "\\-private\\.jpg$" },
+    { PATH = "Alex\\'s photos/" },
+]
+
+[[collection]]
+NAME = "LatestHolidays"
+TITLE = "My latest holidays !"
+HIDDEN = true
+PASSWORD = "farniente"
+DIRS = [
+    { PATH = "2023/July/Roma/", FILTER_EXCLUDE = "\\-private\\.jpg$" },
+]
+
+[[collection]]
+NAME = "All_Nikon"
+DIRS = [
+    { PATH = "", FILTER = "\\/DSC_\\d+\\.jpg$" },
+]
+```
+
+Let's say our gallery is hosted at https://photos.example.com/. This will create three collections :
+- One that will be accessible through https://photos.example.com/BestOf2022/ that will index all the photos in the `2022` directory that are inside a `BestOf` subdirectory (such as "`2022/January/BestOf/`"), excluding the photos that are specifically marked as private (such as `DSC_5840-private.jpg`) -- and also include all the photos in the "`Alex's photos/`" directory (that are supposedly all good anyway).
+- Another collection that will be accessible through https://photos.example.com/LatestHolidays/ and will show all the photos in "`2023/July/Roma/`" from the gallery, excluding the photos that are marked as private. It will be hidden from the nav panel and will be password-protected.
+- A third on https://photos.example.com/All_Nikon/ that aggregates all photos in the gallery with a filename that looks like "`DSC_XXXX.jpg`".
+
+:bulb: Tip : a common use case would be to set a global password in the main config known only to you, and only share links to public collections curated to your specific needs. This allows more control over what photos gets included in the public galleries, and is useful to hide some of the internal directories structure of your `photos` folder. This also makes it easier to show a specific set of photos in an `iframe` embedded in an external webpage, that is constrained to a specific collection and doesn't allow the user to navigate up to the root of the gallery or see the other collections.
+
+
+
+## :handshake: 5/ Acknowledgements
 
 Main icon based on `panorama` by Font-Awesome : [https://fontawesome.com/icons/panorama?s=solid&f=classic](https://fontawesome.com/icons/panorama?s=solid&f=classic)
 
