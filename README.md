@@ -12,7 +12,17 @@
 
 ![Screenshot](https://user-images.githubusercontent.com/2955191/207928165-247f39c1-826a-481d-a7c0-08a3a804d301.jpg)
 
-### <div align="center">[:fire: Demo](https://photo.silica.io/)</div>
+### <div align="center">[:fire: Demo](https://photos.silica.io/)</div>
+
+**Niobium** is an open-source, self-hosted photo gallery viewer that features :
+- a clean, full-screen, responsive grid with subtle animations to showcase your best images
+  - great for including your galleries in other webpages as `iframe`s !
+- recursive indexing of photos and and progressive loading for a highly efficient "infinite scroll" display
+- automatic generation of lightweight previews of each photo and a high-performance Rust backend for blazingly fast loading of each page
+- enlarged (full-screen) display of photos with slideshow mode
+- an optional navigation panel to explore sub-directories
+- custom _collections_, to create independant galleries each with a customizable URL pointing to a curated selections of photos
+- fine-grained password protection and control over the indexing of each directory and collection
 
 *Interested in a hosted version for you or your clients? Contact me at the address displayed on [my profile](https://github.com/Foalyy).*
 
@@ -21,6 +31,7 @@
   - [1.1/ (Option B) Build from source](#wrench-11-option-b-build-from-source)
   - [1.2/ Start as a daemon](#ghost-12-start-as-a-daemon)
   - [1.3/ Set up the reverse proxy](#shield-13-set-up-the-reverse-proxy)
+  - [1.4/ Updating](#arrow_down-14-updating)
 - [2/ Configuration](#gear-2-configuration)
   - [2.1/ Main config file](#spiral_notepad-21-main-config-file)
   - [2.2/ Subdirectories config files](#open_file_folder-22-subdirectories-config-files)
@@ -48,9 +59,10 @@ Copy your photos to the `photos/` directory here. Alternatively, you can leave y
 # cp -r /path/to/my/photos ./photos
 ```
 
-Take a look at the config file, every setting is documented inside :
+Copy the sample configuration file and take a look at it, every setting is documented inside :
 
 ```
+# cp niobium.config.sample niobium.config
 # vim niobium.config
 ```
 
@@ -174,6 +186,19 @@ Enable and start the virtualhost :
 # a2ensite niobium.conf
 # systemctl reload apache2
 ```
+
+
+### :arrow_down: 1.4/ Updating
+
+Updating Niobium to the latest version is easy : 
+- stop the service if it is running
+- if you have installed using a realease :
+  - download the latest release
+  - extract it over your current installation, to replace the existing files
+- if you have built from source :
+  - update : `git pull`
+  - rebuild : `cargo build --release`
+- restart the service
 
 
 ## :gear: 2/ Configuration
