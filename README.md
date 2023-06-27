@@ -432,8 +432,8 @@ The list of collections is defined in a dedicated configuration file, controlled
 - `PASSWORD` _(optional)_ : an optional password required to access the collection.
 - `HIDDEN` _(optional)_ : hide this collection from the navigation panel.
 - `DIRS` _(mandatory)_ : the list of directories that should be included in this collection, each with the following settings :
-  - `PATH` _(mandatory)_ : the path of the directory to include, relative to the root of the gallery (the `photos` folder). Set to `""` to refer to include all photos in the gallery.
-  - `FILTER` _(optional)_ : if specified, only the photos matching this regex will be included. The expression is checked against the full path of each photo, relative to the root of the gallery.
+  - `PATH` _(mandatory)_ : the path of the directory to include, relative to the root of the gallery (the `photos` folder). Set to `""` to include all photos in the gallery.
+  - `FILTER` _(optional)_ : if specified, only the photos matching this regex will be included. The expression is checked against the full path of each photo, relative to the root of the gallery, for instance "`2023/March/Road trip/DSC_1975.jpg`".
   - `FILTER_EXCLUDE` _(optional)_ : if specified, each photo that should be included according to `FILTER` (ie all photos in this directory if `FILTER` is not set) is also checked against this filter which, if it matches, excludes the photo. This can be used to simplify the main filtering regex.
 
 The syntax for the regex's can be found here : https://docs.rs/regex/latest/regex/#syntax. Remember that backslashes are used to escape characters from the configuration string, so to put an escaping backslash in the regex, you need to write two of them, for instance "`\\d`" -- and if you need to match against an actual, literal backslash, you need to write "`\\\\`". [I know, I know](https://xkcd.com/1638/).
@@ -454,25 +454,25 @@ DIRS = [
 [[collection]]
 NAME = "LatestHolidays"
 TITLE = "My latest holidays !"
-HIDDEN = true
-PASSWORD = "farniente"
 DIRS = [
     { PATH = "2023/July/Roma/", FILTER_EXCLUDE = "\\-private\\.jpg$" },
 ]
 
 [[collection]]
 NAME = "All_Nikon"
+HIDDEN = true
+PASSWORD = "eB0eixiu"
 DIRS = [
     { PATH = "", FILTER = "\\/DSC_\\d+\\.jpg$" },
 ]
 ```
 
 Let's say our gallery is hosted at https://photos.example.com/. This will create three collections :
-- One that will be accessible through https://photos.example.com/BestOf2022/ that will index all the photos in the `2022` directory that are inside a `BestOf` subdirectory (such as "`2022/January/BestOf/`"), excluding the photos that are specifically marked as private (such as `DSC_5840-private.jpg`) -- and also include all the photos in the "`Alex's photos/`" directory (that are supposedly all good anyway).
-- Another collection that will be accessible through https://photos.example.com/LatestHolidays/ and will show all the photos in "`2023/July/Roma/`" from the gallery, excluding the photos that are marked as private. It will be hidden from the nav panel and will be password-protected.
-- A third on https://photos.example.com/All_Nikon/ that aggregates all photos in the gallery with a filename that looks like "`DSC_XXXX.jpg`".
+- One that will be accessible through https://photos.example.com/BestOf2022/ that will index all the photos in the `2022` directory that have "`/BestOf/`" somewhere in their path (ie that are inside a `BestOf` subdirectory, such as "`2022/January/BestOf/DSC_1975.jpg`"), but excluding the photos that are specifically marked as private (ie that have a path that ends with "`-private.jpg`", for instance "`2022/January/BestOf/DSC_5840-private.jpg`"). This collection will also include all the photos in the "`Alex's photos/`" directory at the root of the gallery (without any filter because they are supposedly all good and public anyway).
+- Another collection that will be accessible through https://photos.example.com/LatestHolidays/ and will show all the photos in "`2023/July/Roma/`" from the gallery, excluding the photos that are marked as private. Every year, you might change the configuration of this collection so that this public link always refer to the photos of your  latest holidays.
+- A third on https://photos.example.com/All_Nikon/ that aggregates all photos in the gallery with a filename that looks like "`DSC_XXXX.jpg`" (why would you want to do this? I don't know, but it is possible). It will be hidden from the nav panel (only accessible using the link directly) and will be password-protected.
 
-:bulb: Tip : a common use case would be to set a global password in the main config known only to you, and only share links to public collections curated to your specific needs. This allows more control over what photos gets included in the public galleries, and is useful to hide some of the internal directories structure of your `photos` folder. This also makes it easier to show a specific set of photos in an `iframe` embedded in an external webpage, that is constrained to a specific collection and doesn't allow the user to navigate up to the root of the gallery or see the other collections.
+:bulb: **Tip** : a common use case would be to set a global password in the main config known only to you, and only share links to public collections curated to your specific needs. This allows more control over what photos gets included in the public galleries, and is useful to hide some of the internal directories structure of your `photos` folder. This also makes it easier to show a specific set of photos in an `iframe` embedded in an external webpage, that is constrained to a specific collection and doesn't allow the user to navigate up to the root of the gallery or see the other collections.
 
 
 
