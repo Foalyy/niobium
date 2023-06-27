@@ -6,4 +6,5 @@ target
 Cargo.lock
 .cspell/
 .vscode/
+niobium.config
 niobium_collections.config
