@@ -17,7 +17,7 @@
 **Niobium** is an open-source, self-hosted photo gallery viewer that features :
 - a clean, full-screen, responsive grid with subtle animations to showcase your best images
   - great for including your galleries in other webpages as `iframe`s !
-- recursive indexing of photos and and progressive loading for a highly efficient "infinite scroll" display
+- recursive indexing of photos and progressive loading for a highly efficient "infinite scroll" display
 - automatic generation of lightweight previews of each photo and a high-performance Rust backend for blazingly fast loading of each page
 - enlarged (full-screen) display of photos with slideshow mode
 - an optional navigation panel to explore sub-directories
