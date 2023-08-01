@@ -178,6 +178,9 @@ pub struct Collection {
     pub title: Option<String>,
 
     #[serde(default)]
+    pub description: Option<String>,
+
+    #[serde(default)]
     pub password: Option<String>,
 
     #[serde(default)]

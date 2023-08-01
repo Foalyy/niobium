@@ -31,6 +31,11 @@ pub struct Config {
     #[serde(default = "config_default_title")]
     pub TITLE: String,
 
+    /// Description displayed at the top of the navigation panel.
+    /// Default : (empty)
+    #[serde(default)]
+    pub DESCRIPTION: String,
+
     /// Instagram handle to link to in the dedicated button at the upper right,
     /// leave empty to remove the button.
     /// Default : (empty)

@@ -10,6 +10,7 @@ use crate::Error;
 #[derive(Serialize, Debug, Default)]
 pub struct NavData {
     title: String,
+    description: String,
     is_root: bool,
     url_path_root: String,
     current: String,
@@ -77,6 +78,11 @@ impl NavData {
         let title = collection
             .and_then(|c| c.title.clone())
             .unwrap_or(config.TITLE.clone());
+
+        // Description
+        let description = collection
+            .and_then(|c| c.description.clone())
+            .unwrap_or(config.DESCRIPTION.clone());
 
         // Compute the main parameters for the nav panel
         let path_root = match &collection_name {
@@ -208,6 +214,7 @@ impl NavData {
 
         Ok(Self {
             title,
+            description,
             is_root,
             url_path_root: uri!(crate::get_gallery(path_root)).to_string(),
             current,

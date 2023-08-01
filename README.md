@@ -239,6 +239,11 @@ PORT = 8000
 # Default : "Niobium"
 TITLE = "Niobium"
 
+# Description displayed at the top of the navigation panel. Can contain HTML :
+# be careful not to make editable by a user.
+# Default : (empty)
+DESCRIPTION = ""
+
 # Instagram handle to link to in the dedicated button at the upper right,
 # leave empty to remove the button.
 # Default : (empty)
@@ -454,6 +459,7 @@ By default, the list of collections is displayed in the navigation panel when th
 The list of collections is defined in a dedicated configuration file, controlled by the `COLLECTIONS_FILE` parameter in the main config, which by default points to `niobium_collections.config`. The definition of a collection starts with `[[collection]]` followed by some settings :
 - `NAME` _(mandatory)_ : the name of the collection, used in the URL. Only alphanumeric characters, dashes and underscores are allowed.
 - `TITLE` _(optional)_ : the title of the collection, displayed in the navbar. If missing, `NAME` is used instead.
+- `DESCRIPTION` _(optional)_ : some description for the collection, displayed in the navbar. Can contain HTML : be careful not to make editable by a user.
 - `PASSWORD` _(optional)_ : an optional password required to access the collection.
 - `HIDDEN` _(optional)_ : hide this collection from the navigation panel.
 - `DIRS` _(mandatory)_ : the list of directories that should be included in this collection, each with the following settings :
@@ -471,6 +477,7 @@ The syntax for the regex's can be found here : https://docs.rs/regex/latest/rege
 [[collection]]
 NAME = "BestOf2022"
 TITLE = "Best photos of 2022"
+DESCRIPTION = "Some of my best shots. Please tell me which one you like best !"
 DIRS = [
     { PATH = "2022/", FILTER = "\\/BestOf\\/", FILTER_EXCLUDE = "\\-private\\.jpg$" },
     { PATH = "Alex\\'s photos/" },

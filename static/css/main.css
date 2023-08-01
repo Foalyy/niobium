@@ -267,6 +267,20 @@ body.nav-open {
     font-weight: bold;
 }
 
+.navigation-panel-description {
+    margin-bottom: 1em;
+    padding: 0 1em;
+    color: #D0D0D0;
+    text-align: center;
+    line-height: 150%;
+}
+
+.navigation-panel-description a {
+    text-decoration: underline;
+    font-weight: bold;
+    color: white;
+}
+
 .navigation-panel-current-path {
     margin-bottom: 0.5rem;
     min-height: 2em;

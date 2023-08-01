@@ -1,5 +1,6 @@
 <div class="navigation-panel-content">
     {% if nav.title %}<div class="navigation-panel-title"><a class="nav-link" href="{{ nav.url_path_root | safe }}" data-load-url="{{ nav.url_path_root | safe }}?grid" data-nav-url="{{ nav.url_path_root | safe }}?nav">{{ nav.title }}</a></div>{% endif %}
+    {% if nav.description %}<div class="navigation-panel-description">{{ nav.description | safe }}</div>{% endif %}
     <div class="navigation-panel-current-path">
         {% if nav.path_split_open %}
             {% for dir in nav.path_split_open_with_urls %}
