@@ -1,9 +1,9 @@
-use std::{collections::HashMap, fmt::Display};
-
+use base64::{prelude::BASE64_STANDARD, Engine};
 use rocket::{
     http::Status,
     request::{self, FromRequest},
 };
+use std::{collections::HashMap, fmt::Display};
 
 pub type Passwords = HashMap<String, String>;
 
@@ -21,7 +21,7 @@ impl OptionalPassword {
 
     /// Return a new OptionalPassword from the given base64-encoded string
     fn from_base64(encoded: String) -> Result<Self, PasswordDecodeError> {
-        let decoded_buffer = base64::decode(encoded)?;
+        let decoded_buffer = BASE64_STANDARD.decode(encoded)?;
         let password = String::from_utf8(decoded_buffer)?;
         Ok(Self(Some(password)))
     }
@@ -48,7 +48,7 @@ impl<'r> FromRequest<'r> for OptionalPassword {
                 Ok(password) => request::Outcome::Success(password),
                 Err(error) => {
                     eprintln!("Warning : a client sent an invalid Authorization header : {error}");
-                    request::Outcome::Failure((Status::BadGateway, error))
+                    request::Outcome::Error((Status::BadGateway, error))
                 }
             },
             None => request::Outcome::Success(OptionalPassword(None)),

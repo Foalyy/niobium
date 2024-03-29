@@ -57,7 +57,7 @@ impl UID {
     ];
 
     // List of chars used when building an UID (set)
-    pub const CHARS: &str = "0123456789abcdefghijklmnopqrstuvwxyz";
+    pub const CHARS: &'static str = "0123456789abcdefghijklmnopqrstuvwxyz";
 
     /// Generate an UID of the given length that doesn't already exist in the given list
     pub fn new(existing_uids: &[Self]) -> Self {

@@ -1,10 +1,11 @@
 use crate::photos::ImageFormat;
 use crate::Error;
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 use rand::RngCore;
 use rocket::serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::Path;
 use std::{fs, path::PathBuf};
 use toml::value::Table;
@@ -457,7 +458,7 @@ pub fn get_secret_key_or_exit() -> String {
             print!("Secret file not found, generating a new one... ");
             let mut rand_buffer = [0; 32];
             rand::thread_rng().fill_bytes(&mut rand_buffer);
-            let secret = base64::encode(rand_buffer);
+            let secret = BASE64_STANDARD.encode(rand_buffer);
             let mut file = File::create(&path).unwrap_or_else(|error| {
                 eprintln!("\nError : unable to create the .secret file : {error}");
                 std::process::exit(-1);

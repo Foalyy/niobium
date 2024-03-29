@@ -3,13 +3,11 @@ use std::path::{Path, PathBuf};
 use crate::{config::Config, photos::Photo, uid::UID, Error};
 use rocket::{fairing, tokio::fs, Build, Rocket};
 use rocket_db_pools::{
-    sqlx::Row,
     sqlx::{
         self,
-        pool::PoolConnection,
         query::Query,
         sqlite::{SqliteArguments, SqliteRow},
-        QueryBuilder, Sqlite,
+        QueryBuilder, Row, Sqlite, SqliteConnection,
     },
     Database,
 };
@@ -79,7 +77,7 @@ pub async fn init_schema(rocket: Rocket<Build>) -> fairing::Result {
 }
 
 /// Get the list of UIDs that exist in the database
-pub async fn get_existing_uids(db_conn: &mut PoolConnection<Sqlite>) -> Result<Vec<UID>, Error> {
+pub async fn get_existing_uids(db_conn: &mut SqliteConnection) -> Result<Vec<UID>, Error> {
     Ok(sqlx::query("SELECT uid FROM photo;")
         .fetch_all(db_conn)
         .await
@@ -96,17 +94,15 @@ pub async fn get_existing_uids(db_conn: &mut PoolConnection<Sqlite>) -> Result<V
 }
 
 /// Get the list of unique paths known in the database
-pub async fn get_all_paths(db_conn: &mut PoolConnection<Sqlite>) -> Result<Vec<PathBuf>, Error> {
+pub async fn get_all_paths(db_conn: &mut SqliteConnection) -> Result<Vec<PathBuf>, Error> {
     Ok(sqlx::query("SELECT path FROM photo GROUP BY path;")
         .fetch_all(db_conn)
         .await
         .map(|rows| {
-            // Convert the list of rows into a list of PathBuf's, excluding invalid inputs from the result
+            // Convert the list of rows into a list of PathBuf's
             rows.iter()
                 .filter_map(|row| -> Option<PathBuf> {
-                    row.try_get(0)
-                        .ok()
-                        .and_then(|col: String| PathBuf::try_from(&col).ok())
+                    row.try_get(0).ok().map(|col: String| PathBuf::from(&col))
                 })
                 .collect::<Vec<PathBuf>>()
         })?)
@@ -114,7 +110,7 @@ pub async fn get_all_paths(db_conn: &mut PoolConnection<Sqlite>) -> Result<Vec<P
 
 /// Get the list of photos known in the database that are registered in one of the given paths
 pub async fn get_photos_in_paths(
-    db_conn: &mut PoolConnection<Sqlite>,
+    db_conn: &mut SqliteConnection,
     paths: &[PathBuf],
     config: &Config,
 ) -> Result<Vec<Photo>, Error> {
@@ -135,7 +131,7 @@ pub async fn get_photos_in_paths(
 
 /// Get the list of photos known in the database that are registered in the given path, ordered
 pub async fn get_photos_in_path(
-    db_conn: &mut PoolConnection<Sqlite>,
+    db_conn: &mut SqliteConnection,
     path: &Path,
     sort_columns: &[String],
     config: &Config,
@@ -166,7 +162,7 @@ pub async fn get_photos_in_path(
 /// Execute the given query (which must be a "SELECT * FROM photo", and parameters must already have been bound)
 /// and map the resulting rows to a list of Photo's
 async fn get_photos_from_query<'q>(
-    db_conn: &mut PoolConnection<Sqlite>,
+    db_conn: &mut SqliteConnection,
     query: Query<'q, Sqlite, SqliteArguments<'q>>,
     config: &Config,
 ) -> Result<Vec<Photo>, Error> {
@@ -193,10 +189,7 @@ async fn get_photos_from_query<'q>(
 }
 
 /// Insert a list of photos into the database
-pub async fn insert_photos(
-    db_conn: &mut PoolConnection<Sqlite>,
-    photos: &[Photo],
-) -> Result<(), Error> {
+pub async fn insert_photos(db_conn: &mut SqliteConnection, photos: &[Photo]) -> Result<(), Error> {
     // Insert photos by batches of up to 100
     for batch in photos.chunks(100) {
         let mut query_builder = QueryBuilder::new(
@@ -252,10 +245,7 @@ pub async fn insert_photos(
 }
 
 /// Remove a list of photos from the database, based on their UIDs
-pub async fn remove_photos(
-    db_conn: &mut PoolConnection<Sqlite>,
-    photos: &[Photo],
-) -> Result<(), Error> {
+pub async fn remove_photos(db_conn: &mut SqliteConnection, photos: &[Photo]) -> Result<(), Error> {
     // Remove photos by batches of up to 100
     for batch in photos.chunks(100) {
         let mut query_builder: QueryBuilder<Sqlite> =
@@ -273,7 +263,7 @@ pub async fn remove_photos(
 
 /// Rename/move a list of photos in the database, based on their UIDs
 pub async fn move_photos(
-    db_conn: &mut PoolConnection<Sqlite>,
+    db_conn: &mut SqliteConnection,
     photos_pairs: &Vec<(Photo, Photo)>,
 ) -> Result<(), Error> {
     for photos_pair in photos_pairs {

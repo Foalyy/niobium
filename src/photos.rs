@@ -3,6 +3,8 @@ use crate::config::Config;
 use crate::password::{self, OptionalPassword, PasswordError, Passwords};
 use crate::uid::UID;
 use crate::{db, Error};
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use md5::{Digest, Md5};
@@ -15,8 +17,7 @@ use rocket::tokio::sync::{RwLock, RwLockReadGuard};
 use rocket::tokio::task::JoinSet;
 use rocket::tokio::time::Instant;
 use rocket::{fairing, tokio, Rocket};
-use rocket_db_pools::sqlx::pool::PoolConnection;
-use rocket_db_pools::sqlx::Sqlite;
+use rocket_db_pools::sqlx::SqliteConnection;
 use rocket_db_pools::Database;
 use serde::Deserialize;
 use std::cmp::min;
@@ -405,7 +406,7 @@ impl Gallery {
     pub async fn reload(
         &self,
         config: &Config,
-        db_conn: &mut PoolConnection<Sqlite>,
+        db_conn: &mut SqliteConnection,
     ) -> Result<(), Error> {
         self.clear().await;
         println!("Reloading photos...");
@@ -714,7 +715,7 @@ impl Gallery {
         &'a self,
         full_path: &'a PathBuf,
         rel_path: &'a PathBuf,
-        db_conn: &'a mut PoolConnection<Sqlite>,
+        db_conn: &'a mut SqliteConnection,
         main_config: &'a Config,
         configs_stack: &'a mut Vec<(PathBuf, Table)>,
         default_config: &'a Config,
@@ -762,7 +763,7 @@ impl Gallery {
                         rel_path.display()
                     );
                     // Generate a random password to prevent access
-                    base64::encode(rand::random::<[u8; 32]>())
+                    BASE64_STANDARD.encode(rand::random::<[u8; 32]>())
                 }
                 None => "".to_string(),
             };
@@ -1038,11 +1039,7 @@ impl Gallery {
     }
 
     /// Load all available photos in the photos folder, add them to the given gallery, and sync them with the database
-    async fn load(
-        &self,
-        config: &Config,
-        db_conn: &mut PoolConnection<Sqlite>,
-    ) -> Result<(), Error> {
+    async fn load(&self, config: &Config, db_conn: &mut SqliteConnection) -> Result<(), Error> {
         // Make sure the main directories (photos and cache) exist, and if not, try to create them
         check_config_dir(&PathBuf::from(&config.PHOTOS_DIR)).await
             .map_err(|e| {
@@ -1129,10 +1126,7 @@ impl Gallery {
                     .take(batch_size)
                 {
                     let full_path = photo.full_path.clone();
-                    tasks.spawn(async move {
-                        let full_path = full_path;
-                        (idx, calculate_file_md5(&full_path).await)
-                    });
+                    tasks.spawn(async move { (idx, calculate_file_md5(&full_path).await) });
                 }
                 offset += batch_size;
 

@@ -163,7 +163,7 @@ impl NavData {
         // Generate URI for the Navigate Up button
         let url_navigate_up = path_navigate_up
             .map(|p| uri!(crate::get_gallery(PathBuf::from(&p))).to_string())
-            .unwrap_or_else(|| "".to_string());
+            .unwrap_or_default();
 
         // Check which subdirs are locked
         let mut locked_subdirs: Vec<String> = Vec::new();
