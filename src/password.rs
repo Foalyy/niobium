@@ -81,7 +81,11 @@ impl From<std::string::FromUtf8Error> for PasswordDecodeError {
 
 impl Display for PasswordDecodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Invalid header")
+        f.write_str("Invalid header : ")?;
+        match self {
+            PasswordDecodeError::Base64DecodeError(error) => f.write_str(format!("invalid base64 encoding : {error}").as_str()),
+            PasswordDecodeError::Utf8DecodeError(error) => f.write_str(format!("invalid UTF-8 encoding : {error}").as_str()),
+        }
     }
 }
 

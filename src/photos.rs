@@ -69,7 +69,7 @@ impl Photo {
 
         // Load the image
         println!("Parsing metadata for photo {}...", self.full_path.display());
-        let img = image::io::Reader::open(&self.full_path)
+        let img = image::ImageReader::open(&self.full_path)
             .map_err(|e| Error::FileError(e, self.full_path.clone()))?
             .decode()
             .map_err(|e| Error::ImageError(e, self.full_path.clone()))?;
@@ -252,7 +252,7 @@ impl Photo {
         }
 
         // Load the image
-        let img = image::io::Reader::open(file_path)
+        let img = image::ImageReader::open(file_path)
             .map_err(|e| Error::FileError(e, file_path.clone()))?
             .decode()
             .map_err(|e| {
@@ -1042,18 +1042,16 @@ impl Gallery {
     async fn load(&self, config: &Config, db_conn: &mut SqliteConnection) -> Result<(), Error> {
         // Make sure the main directories (photos and cache) exist, and if not, try to create them
         check_config_dir(&PathBuf::from(&config.PHOTOS_DIR)).await
-            .map_err(|e| {
-                if let Error::FileError(error, path) = &e {
+            .inspect_err(|e| {
+                if let Error::FileError(error, path) = e {
                     println!("There is an issue with the PHOTOS_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error);
                 }
-                e
             })?;
         check_config_dir(&PathBuf::from(&config.CACHE_DIR)).await
-            .map_err(|error| {
-                if let Error::FileError(error, path) = &error {
+            .inspect_err(|error| {
+                if let Error::FileError(error, path) = error {
                     eprintln!("There is an issue with the CACHE_DIR setting in the config file (\"{}\") : {} : {}", path.display(), error.kind(), error);
                 }
-                error
             })?;
 
         // Keep these paths on hand

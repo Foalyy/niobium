@@ -269,8 +269,8 @@ pub async fn move_photos(
     for photos_pair in photos_pairs {
         sqlx::query("UPDATE photo SET filename=?, path=? WHERE uid=?;")
             .bind(&photos_pair.1.filename)
-            .bind(&photos_pair.1.path.to_string_lossy())
-            .bind(&photos_pair.0.uid.to_string())
+            .bind(photos_pair.1.path.to_string_lossy())
+            .bind(photos_pair.0.uid.to_string())
             .execute(&mut *db_conn)
             .await?;
     }
