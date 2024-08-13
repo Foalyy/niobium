@@ -1062,7 +1062,7 @@ impl Gallery {
         let default_config = Config::default();
 
         // Initialize the stack of configs with the main config
-        let subdir_config = Config::read_as_table().unwrap_or_else(|_| Table::new());
+        let subdir_config = config.as_value().unwrap_or_else(|_| Table::new());
         let mut configs_stack: Vec<(PathBuf, Table)> = Vec::new();
         configs_stack.push((PathBuf::from("[main]"), subdir_config));
 

@@ -10,8 +10,13 @@ use std::path::Path;
 use std::{fs, path::PathBuf};
 use toml::value::Table;
 
-/// Name of the main config file in the app's folder
-pub const FILENAME: &str = "niobium.config";
+/// Default name of the main config file in the app's folder
+/// Can be overriden with the NIOBIUM_CONFIG_FILE environment variable
+pub const DEFAULT_CONFIG_FILENAME: &str = "niobium.config";
+
+/// Default name of the secret file in the app's folder
+/// Can be overriden with the NIOBIUM_CONFIG_FILE environment variable
+pub const DEFAULT_SECRET_FILENAME: &str = ".secret";
 
 /// The app's config
 #[allow(non_snake_case)]
@@ -241,23 +246,77 @@ impl Config {
         Self::from_value(toml::Value::Table(table))
     }
 
+    /// Serialize this Config into a TOML Table
+    pub fn as_value(&self) -> Result<toml::Table, toml::ser::Error> {
+        toml::Table::try_from(self)
+    }
+
     /// Deserialize a TOML Value into a Config struct
     pub fn from_value(value: toml::Value) -> Result<Self, toml::de::Error> {
         value.try_into::<Self>()
     }
 
     /// Read the main config file and deserialize it into a Config struct
-    pub fn read() -> Result<Self, Error> {
-        Ok(toml::from_str(
-            Self::read_path_as_string(FILENAME)?.as_str(),
-        )?)
+    pub fn read(config_file: &Path) -> Result<Self, Error> {
+        // Read the config from the given file
+        let mut config: Config = toml::from_str(Self::read_path_as_string(config_file)?.as_str())?;
+
+        // Override some fields with environment variables
+        if let Ok(var) = std::env::var("NIOBIUM_ADDRESS") {
+            config.ADDRESS = var;
+        };
+        if let Ok(var) = std::env::var("NIOBIUM_PORT") {
+            match var.parse() {
+                Ok(port) => config.PORT = port,
+                Err(error) => eprintln!("Warning, invalid value for NIOBIUM_PORT : {error}. Using the value from the config file instead."),
+            }
+        };
+        if let Ok(var) = std::env::var("NIOBIUM_TITLE") {
+            config.TITLE = var;
+        };
+        if let Ok(var) = std::env::var("NIOBIUM_DESCRIPTION") {
+            config.DESCRIPTION = var;
+        };
+        if let Ok(var) = std::env::var("NIOBIUM_PHOTOS_DIR") {
+            config.PHOTOS_DIR = var;
+        };
+        if let Ok(var) = std::env::var("NIOBIUM_CACHE_DIR") {
+            config.CACHE_DIR = var;
+        };
+        if let Ok(var) = std::env::var("NIOBIUM_DATABASE_PATH") {
+            config.DATABASE_PATH = var;
+        };
+        if let Ok(var) = std::env::var("NIOBIUM_LOADING_WORKERS") {
+            match var.parse() {
+                Ok(n) => config.LOADING_WORKERS = n,
+                Err(error) => eprintln!("Warning, invalid value for NIOBIUM_LOADING_WORKERS : {error}. Using the value from the config file instead."),
+            }
+        };
+        if let Ok(var) = std::env::var("NIOBIUM_PASSWORD") {
+            config.PASSWORD = var;
+        };
+        if let Ok(var) = std::env::var("NIOBIUM_PASSWORD_FILE") {
+            match fs::read_to_string(PathBuf::from(var.clone())) {
+                Ok(file_content) => {
+                    config.PASSWORD = file_content.split('\n').next().unwrap_or("").to_string()
+                }
+                Err(error) => Err(Error::OtherError(format!(
+                    "Error : unable to open {var} specified in NIOBIUM_PASSWORD_FILE : {error}"
+                )))?,
+            }
+        };
+        if let Ok(var) = std::env::var("NIOBIUM_COLLECTIONS_FILE") {
+            config.COLLECTIONS_FILE = PathBuf::from(var);
+        };
+
+        Ok(config)
     }
 
     /// Try to read and parse the config file
     /// In case of error, print it to stderr and exit with a status code of -1
-    pub fn read_or_exit() -> Self {
+    pub fn read_or_exit(config_file: &Path) -> Self {
         // Read the config file and parse it into a Config struct
-        Self::read().unwrap_or_else(|e| match e {
+        Self::read(config_file).unwrap_or_else(|e| match e {
             Error::FileError(error, path) => {
                 eprintln!(
                     "Error, unable to open the config file \"{}\" : {}",
@@ -267,7 +326,10 @@ impl Config {
                 std::process::exit(-1);
             }
             Error::TomlParserError(error) => {
-                eprintln!("Error, unable to parse the config file \"{FILENAME}\" : {error}");
+                eprintln!(
+                    "Error, unable to parse the config file \"{}\" : {error}",
+                    config_file.to_string_lossy()
+                );
                 std::process::exit(-1);
             }
             _ => std::process::exit(-1),
@@ -278,11 +340,6 @@ impl Config {
     // pub fn read_as_value() -> Result<toml::Value, Error> {
     //     Self::read_path_as_value(FILENAME)
     // }
-
-    /// Read the main config file and return it as a TOML Table
-    pub fn read_as_table() -> Result<Table, Error> {
-        Self::read_path_as_table(FILENAME)
-    }
 
     // /// Read the config file at the given location and deserialize it into a Config struct
     // pub fn read_path<P>(path: P) -> Result<Self, Error>
@@ -449,7 +506,16 @@ fn config_default_collections_file() -> PathBuf {
 /// the secret key inside. If this file doesn't exist, try to generate
 /// a new one. In case of an error, print the error on stderr and exit.
 pub fn get_secret_key_or_exit() -> String {
-    let path = PathBuf::from(".secret");
+    let var_name = "NIOBIUM_SECRET_FILE";
+    let secret_file_str = match std::env::var(var_name) {
+        Ok(secret_file_str) => secret_file_str,
+        Err(std::env::VarError::NotPresent) => DEFAULT_SECRET_FILENAME.to_string(),
+        Err(error) => {
+            eprintln!("Error : invalid {var_name} environment var : {error}");
+            std::process::exit(-1);
+        }
+    };
+    let path = PathBuf::from(secret_file_str);
     match fs::read_to_string(&path) {
         Ok(secret) => secret.trim().to_string(),
 

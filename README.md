@@ -33,8 +33,9 @@
   - [1.3/ Set up the reverse proxy](#shield-13-set-up-the-reverse-proxy)
   - [1.4/ Updating](#arrow_down-14-updating)
 - [2/ Configuration](#gear-2-configuration)
-  - [2.1/ Main config file](#spiral_notepad-21-main-config-file)
-  - [2.2/ Subdirectories config files](#open_file_folder-22-subdirectories-config-files)
+  - [2.1/ Environment variables](#globe_with_meridians-21-environment-variables)
+  - [2.2/ Main config file](#spiral_notepad-22-main-config-file)
+  - [2.3/ Subdirectories config files](#open_file_folder-23-subdirectories-config-files)
 - [3/ Reloading](#arrows_counterclockwise-3-reloading)
 - [4/ Collections](#framed_picture-4-collections)
 - [5/ Acknowledgements](#handshake-5-acknowledgements)
@@ -203,9 +204,30 @@ Updating Niobium to the latest version is easy :
 
 ## :gear: 2/ Configuration
 
-### :spiral_notepad: 2.1/ Main config file
+### :globe_with_meridians: 2.1/ Environment variables
 
-The main config file, `niobium.config`, is self-documented, see below.
+Niobium can be configured using environment variables :
+
+- `NIOBIUM_CONFIG_FILE` : path to the main config file (default : `niobium.config`)
+- `NIOBIUM_SECRET_FILE` : file that will be generated with the secret key used for private cookies (default : `.secret`)
+
+Some (but not all) settings from the config can be overriden with environment variables, by prefixing the name of the setting with `NIOBIUM_` :
+- `NIOBIUM_ADDRESS`
+- `NIOBIUM_PORT`
+- `NIOBIUM_TITLE`
+- `NIOBIUM_DESCRIPTION`
+- `NIOBIUM_PHOTOS_DIR`
+- `NIOBIUM_CACHE_DIR`
+- `NIOBIUM_DATABASE_PATH`
+- `NIOBIUM_LOADING_WORKERS`
+- `NIOBIUM_PASSWORD` (can also be specified as a file using `NIOBIUM_PASSWORD_FILE`)
+- `NIOBIUM_COLLECTIONS_FILE`
+For more information about these, see below.
+
+
+### :spiral_notepad: 2.2/ Main config file
+
+The main config file, `niobium.config` by default, is self-documented, see below.
 
 After changing a setting, the app needs to be restarted, for example using :
 ```
@@ -426,7 +448,7 @@ COLLECTIONS_FILE = "niobium_collections.config"
 ```
 
 
-### :open_file_folder: 2.2/ Subdirectories config files
+### :open_file_folder: 2.3/ Subdirectories config files
 
 When your photos folder is sorted into subdirectories, some settings can be customized for specific directories by creating a `.niobium.config` config file (note the leading dot in the filename) inside these directories. Available settings are those marked as "overridable" in the main config file.
 

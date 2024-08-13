@@ -31,7 +31,17 @@ use uid::UID;
 #[launch]
 async fn rocket() -> _ {
     // Try to read the config file
-    let config = Config::read_or_exit();
+    let config_file_var_name = "NIOBIUM_CONFIG_FILE";
+    let config_file_str = match std::env::var(config_file_var_name) {
+        Ok(config_file_str) => config_file_str,
+        Err(std::env::VarError::NotPresent) => config::DEFAULT_CONFIG_FILENAME.to_string(),
+        Err(error) => {
+            eprintln!("Error : invalid {config_file_var_name} environment var : {error}");
+            std::process::exit(-1);
+        }
+    };
+    let config_file = PathBuf::from(config_file_str);
+    let config = Config::read_or_exit(&config_file);
     let address = config.ADDRESS.clone();
     let port = config.PORT;
 
@@ -46,9 +56,8 @@ async fn rocket() -> _ {
                 .parse::<IpAddr>()
                 .map_err(|e| {
                     eprintln!(
-                        "Error : invalid value for ADDRESS in {} : {}",
-                        config::FILENAME,
-                        e
+                        "Error : invalid value for ADDRESS in {} : {e}",
+                        config_file.to_string_lossy()
                     );
                     std::process::exit(-1);
                 })
