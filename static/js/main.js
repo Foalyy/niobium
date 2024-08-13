@@ -15,6 +15,7 @@ let navigationPanelWidth = undefined;
 let navigationPanelTouchX = undefined;
 let navigationPanelDeltaX = undefined;
 let navigationPanelTransition = undefined;
+let loupeLoadingDisplayTimeout = undefined;
 
 let gridStartIntersectionObserver = new IntersectionObserver(function(elements) {
     if (elements[0].isIntersecting) {
@@ -681,8 +682,15 @@ function setLoupePhoto(gridItem) {
                 opacityTransitionTimeout = undefined;
             }
             photo.attr('src', '');
-            $('.loupe-loading').removeClass('hidden');
+            loupeLoadingDisplayTimeout = setTimeout(() => {
+                $('.loupe-loading').removeClass('hidden');
+                loupeLoadingDisplayTimeout = undefined;
+            }, 200);
             photo.one('load', function() {
+                if (loupeLoadingDisplayTimeout) {
+                    clearTimeout(loupeLoadingDisplayTimeout);
+                    loupeLoadingDisplayTimeout = undefined;
+                }
                 $('.loupe-loading').addClass('hidden');
                 photo.removeClass('transparent');
                 if (showMetadata) {
@@ -690,6 +698,16 @@ function setLoupePhoto(gridItem) {
                 }
                 if (slideshowIntervalTimer) {
                     slideshowLoading = false;
+                }
+                let nextGridItem = $(gridItem).next();
+                if (nextGridItem.length > 0) {
+                    let nextPhoto = new Image();
+                    nextPhoto.src = nextGridItem.children().first().data('src-large');
+                }
+                let prevGridItem = $(gridItem).prev();
+                if (prevGridItem.length > 0) {
+                    let prevPhoto = new Image();
+                    prevPhoto.src = prevGridItem.children().first().data('src-large');
                 }
             });
             photo.attr('src', $(loupeElement).data('src-large'));
