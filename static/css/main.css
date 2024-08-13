@@ -821,6 +821,35 @@ body.nav-open {
     min-width: 2rem;
 }
 
+
+.loupe-photo-index,
+.grid-actions,
+.loupe-actions {
+    transition: top 0.5s ease;
+}
+
+.loupe-prev {
+    transition: left 0.5s ease;
+}
+
+.loupe-next {
+    transition: right 0.5s ease;
+}
+
+.loupe.hide-ui .loupe-photo-index,
+.loupe.hide-ui .grid-actions,
+.loupe.hide-ui .loupe-actions {
+    top: -6rem;
+}
+
+.loupe.hide-ui .loupe-prev {
+    left: -6rem;
+}
+
+.loupe.hide-ui .loupe-next {
+    right: -6rem;
+}
+
 @media (min-width: 576px) {
     .grid-content {
         flex-direction: row;

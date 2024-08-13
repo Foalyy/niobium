@@ -16,6 +16,7 @@ let navigationPanelTouchX = undefined;
 let navigationPanelDeltaX = undefined;
 let navigationPanelTransition = undefined;
 let loupeLoadingDisplayTimeout = undefined;
+let hideLoupeUiTimeout = undefined;
 
 let gridStartIntersectionObserver = new IntersectionObserver(function(elements) {
     if (elements[0].isIntersecting) {
@@ -661,6 +662,7 @@ function openLoupe(gridItem) {
     mouseEnterEnabled = false;
     disconnectGridLoaderObservers();
     savedScroll = window.pageYOffset;
+    showLoupeUI();
     setLoupePhoto(gridItem);
     $('.container').addClass('show-loupe');
     $('.loupe-loading').removeClass('hidden');
@@ -889,6 +891,26 @@ function loupeLast() {
     selectPhoto(last);
 }
 
+function showLoupeUI() {
+    $('.loupe').removeClass('hide-ui');
+    if (hideLoupeUiTimeout) {
+        clearTimeout(hideLoupeUiTimeout);
+        hideLoupeUiTimeout = undefined;
+    }
+    hideLoupeUiTimeout = setTimeout(() => {
+        hideLoupeUiTimeout = undefined;
+        hideLoupeUI();
+    }, 5000);
+}
+
+function hideLoupeUI() {
+    $('.loupe').addClass('hide-ui');
+    if (hideLoupeUiTimeout) {
+        clearTimeout(hideLoupeUiTimeout);
+        hideLoupeUiTimeout = undefined;
+    }
+}
+
 function toggleShowMetadata() {
     showMetadata = !showMetadata;
     if (showMetadata) {
@@ -993,6 +1015,9 @@ $(function() {
         }
         event.preventDefault();
         event.stopPropagation();
+    });
+    $('.loupe').on('mousemove', function(event) {
+        showLoupeUI();
     });
     $('.loupe-prev').on('click', function(event) {
         loupePrev();
