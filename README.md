@@ -27,8 +27,9 @@
 *Interested in a hosted version for you or your clients? Contact me at the address displayed on [my profile](https://github.com/Foalyy).*
 
 - [1/ Installation](#hammer_and_wrench-1-installation)
-  - [1.1/ (Option A) Install using a release](#package-11-option-a-install-using-a-release-recommended)
-  - [1.1/ (Option B) Build from source](#wrench-11-option-b-build-from-source)
+  - [1.1/ (Option A) Install with Docker](#ship-11-option-a-install-with-docker)
+  - [1.1/ (Option B) Install using a release](#package-11-option-b-install-using-a-release)
+  - [1.1/ (Option C) Build from source](#wrench-11-option-c-build-from-source)
   - [1.2/ Start as a daemon](#ghost-12-start-as-a-daemon)
   - [1.3/ Set up the reverse proxy](#shield-13-set-up-the-reverse-proxy)
   - [1.4/ Updating](#arrow_down-14-updating)
@@ -42,7 +43,44 @@
 
 ## :hammer_and_wrench: 1/ Installation
 
-### :package: 1.1/ *(Option A)* Install using a release (recommended)
+### :ship: 1.1/ *(Option A)* Install with Docker
+
+If you have Docker installed, this is the easiest solution. You will need 2 directories : 
+
+- the directory where you store your photos (read-only access is enough), for instance `/srv/niobium/photos/`, which must be mounted into `/app/photos` inside the container
+- a `data` directory (which must be mounted into `/app/data` inside the container) where the config, database, and cache will be stored, for instance `/srv/niobium/data/` (write access is required)
+
+Then simply download and run Niobium using :
+
+```
+$ docker run -v /srv/niobium/photos:/app/photos:ro -v /srv/niobium/data:/app/data -p 8000:8000 niobium
+```
+
+This will expose Niobium on the port 8000.
+
+The Docker image has a startup script which copies the default config file into the `data` directory the first time the container is launched, and overrides the default value of some environment variables to point to this directory (see `docker_entrypoint.sh` for more information). In order to customize the configuration, launch the app a first time, then edit the newly-created `niobium.config` inside the `data` directory, and finally restart the app to reload the config. There is also a `niobium_collections.config.sample` that can be customized and renamed to `niobium_collections.config` in order to create collections (see [Collections](#framed_picture-4-collections) below).
+
+If you prefer to use `docker-compose`, here is a sample script :
+
+```
+version: "3"
+
+services:
+  niobium:
+    image: niobium
+    container_name: niobium
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - /srv/niobium/photos:/app/photos:ro
+      - /srv/niobium/data:/app/data
+    environment:
+      - NIOBIUM_LOADING_WORKERS=4 # Example of config override using environment variables
+```
+
+
+### :package: 1.1/ *(Option B)* Install using a release
 
 Example of how to install Niobium on Debian 11 in `/var/www/my_photos`, customize the paths as needed.
 
@@ -83,7 +121,7 @@ Start Niobium to make sure everything works fine. Note that photos indexing (and
 
 Niobium is now running, but for a more permanent installation, keep reading [section 1.2](#12-start-as-a-daemon).
 
-### :wrench: 1.1/ *(Option B)* Build from source
+### :wrench: 1.1/ *(Option C)* Build from source
 
 Niobium is built with Rust, you will need a Rust compiler to compile it. Here is the simplest way to install one, following [official instructions](https://www.rust-lang.org/tools/install), which will install Cargo (an all-in-one tool to easily compile and run Rust programs) and an up-to-date Rust compiler :
 
@@ -222,6 +260,7 @@ Some (but not all) settings from the config can be overriden with environment va
 - `NIOBIUM_LOADING_WORKERS`
 - `NIOBIUM_PASSWORD` (can also be specified as a file using `NIOBIUM_PASSWORD_FILE`)
 - `NIOBIUM_COLLECTIONS_FILE`
+
 For more information about these, see below.
 
 

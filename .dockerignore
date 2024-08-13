@@ -1,0 +1,9 @@
+.cargo
+.vscode/
+target
+cache
+photos
+.secret
+niobium.config
+niobium_collections.config
+*.sqlite
