@@ -9,6 +9,7 @@ let loadGridRequest = undefined;
 let loadNavRequest = undefined;
 let slideshowTimeStep = 20;
 let slideshowTimeCounter = 0;
+let slideshowLoading = false;
 let navigationPanel = undefined;
 let navigationPanelWidth = undefined;
 let navigationPanelTouchX = undefined;
@@ -687,6 +688,9 @@ function setLoupePhoto(gridItem) {
                 if (showMetadata) {
                     $('.loupe-metadata').removeClass('invisible');
                 }
+                if (slideshowIntervalTimer) {
+                    slideshowLoading = false;
+                }
             });
             photo.attr('src', $(loupeElement).data('src-large'));
             $('.loupe').css('background-color', $(loupeElement).data('color') + 'FC');
@@ -840,6 +844,9 @@ function loupeNext(loop=false) {
     slideshowTimeCounter = 0;
     let next = $(loupeElement).parent().next();
     if (next.length > 0) {
+        if (slideshowIntervalTimer) {
+            slideshowLoading = true;
+        }
         setLoupePhoto(next);
         selectPhoto(next);
         if (next.data('index') < $(loupeElement).parent().data('count') - 1 && $('[data-index="' + (next.data('index') + 1) + '"]').length == 0) {
@@ -880,12 +887,16 @@ function startSlideshow() {
         btnStop.addClass('button-progress');
         btnStop.removeClass('hidden');
         slideshowIntervalTimer = setInterval(function() {
-            slideshowTimeCounter++;
-            if (slideshowTimeCounter * slideshowTimeStep >= slideshowDelay) {
-                slideshowTimeCounter = 0;
-                loupeNext(true);
+            if (slideshowLoading) {
+                updateSlideshowProgress(100.0 * slideshowTimeCounter * slideshowTimeStep / slideshowDelay);
+            } else {
+                slideshowTimeCounter++;
+                if (slideshowTimeCounter * slideshowTimeStep >= slideshowDelay) {
+                    slideshowTimeCounter = 0;
+                    loupeNext(true);
+                }
+                updateSlideshowProgress(100.0 * slideshowTimeCounter * slideshowTimeStep / slideshowDelay);
             }
-            updateSlideshowProgress(100.0 * slideshowTimeCounter * slideshowTimeStep / slideshowDelay);
         }, slideshowTimeStep);
     }
 }
