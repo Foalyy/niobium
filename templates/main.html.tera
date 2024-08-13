@@ -45,8 +45,9 @@
                 <div class="navigation-panel-container invisible">
                     <div class="navigation-panel">
                         <div class="navigation-panel-content"></div>
+                        <div class="navigation-panel-close-bottom"><i class="fa-solid fa-angle-left fa-fw"></i> Hide the navigation panel</div>
                         <div class="navigation-panel-pin"><i class="fa-solid fa-thumbtack fa-fw fa-rotate-by"></i></div>
-                        <div class="navigation-panel-close"><i class="fa-solid fa-xmark fa-fw"></i></div>
+                        <div class="navigation-panel-close"><i class="fa-solid fa-angle-left fa-fw"></i></div>
                         <div class="loading loading-fullsize nav-loading">
                             <div class="spinner"><img src="/static/img/spinner.svg"></div>
                         </div>
@@ -78,6 +79,7 @@
                 </div>
             {% endif %}
             <div class="loupe-actions">
+                <div class="loupe-button loupe-action-close" title="Close this photo"><i class="fa-solid fa-xmark fa-fw"></i></div>
                 <div class="loupe-button loupe-action-info" title="Toggle metadata display"><i class="fa-solid fa-info-circle fa-fw"></i></div>
                 <div class="loupe-button loupe-action-slideshow-start" title="Start slideshow"><i class="fa-solid fa-play fa-fw"></i></div>
                 <div class="loupe-button loupe-action-slideshow-stop hidden" title="Pause slideshow"><div class="button-progress-inner"><i class="fa-solid fa-pause fa-fw"></i></div></div>

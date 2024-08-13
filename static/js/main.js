@@ -9,6 +9,11 @@ let loadGridRequest = undefined;
 let loadNavRequest = undefined;
 let slideshowTimeStep = 20;
 let slideshowTimeCounter = 0;
+let navigationPanel = undefined;
+let navigationPanelWidth = undefined;
+let navigationPanelTouchX = undefined;
+let navigationPanelDeltaX = undefined;
+let navigationPanelTransition = undefined;
 
 let gridStartIntersectionObserver = new IntersectionObserver(function(elements) {
     if (elements[0].isIntersecting) {
@@ -909,8 +914,16 @@ function isSlideshowStarted() {
     return slideshowIntervalTimer != undefined;
 }
 
+function openCurrentPhotoInNewTab() {
+    window.open($(loupeElement).data('src-full'));
+}
+
 function downloadCurrentPhoto() {
     window.open($(loupeElement).data('src-download'));
+}
+
+function isTouchscreen() {
+    return "maxTouchPoints" in navigator && navigator.maxTouchPoints > 0;
 }
 
 
@@ -944,7 +957,11 @@ $(function() {
         event.stopPropagation();
     });
     $('.loupe').on('click', function(event) {
-        closeLoupe();
+        if (isTouchscreen()) {
+            openCurrentPhotoInNewTab();
+        } else {
+            closeLoupe();
+        }
         event.preventDefault();
         event.stopPropagation();
     });
@@ -955,6 +972,11 @@ $(function() {
     });
     $('.loupe-next').on('click', function(event) {
         loupeNext();
+        event.preventDefault();
+        event.stopPropagation();
+    });
+    $('.loupe-action-close').on('click', function(event) {
+        closeLoupe();
         event.preventDefault();
         event.stopPropagation();
     });
@@ -983,6 +1005,11 @@ $(function() {
         event.preventDefault();
         event.stopPropagation();
     });
+    $('.navigation-panel-close-bottom').on('click', function(event) {
+        closeNavigationPanel();
+        event.preventDefault();
+        event.stopPropagation();
+    });
     $('.navigation-panel-pin').on('click', function(event) {
         toggleNavigationPanelPin();
         event.preventDefault();
@@ -1002,6 +1029,39 @@ $(function() {
         gridZoomOut();
         event.preventDefault();
         event.stopPropagation();
+    });
+
+    navigationPanel = $('.navigation-panel');
+    navigationPanel.on('touchstart', function(event) {
+        navigationPanelWidth = navigationPanel.outerWidth();
+        navigationPanelTouchX = event.touches[0].clientX;
+        navigationPanelDeltaX = 0;
+        navigationPanelTransition = $('.navigation-panel').css('transition');
+        $('.navigation-panel').css('transition', 'none');
+    });
+
+    navigationPanel.on('touchmove', function(event) {
+        let deltaX = navigationPanelTouchX - event.touches[0].clientX;
+        if (deltaX < 0) {
+            deltaX = 0;
+        } else if (deltaX > navigationPanelWidth) {
+            deltaX = navigationPanelWidth;
+        }
+        navigationPanelDeltaX = deltaX;
+        navigationPanel.css('left', '-' + navigationPanelDeltaX + 'px');
+    });
+
+    navigationPanel.on('touchend', function(event) {
+        $('.navigation-panel').css('left', '');
+        $('.navigation-panel').css('transition', navigationPanelTransition);
+        if (navigationPanelDeltaX < navigationPanelWidth / 2) {
+            openNavigationPanel();
+        } else {
+            closeNavigationPanel();
+        }
+        navigationPanelTouchX = undefined;
+        navigationPanelDeltaX = undefined;
+        navigationPanelTransition = undefined;
     });
 
     window.onkeydown = function(event) {

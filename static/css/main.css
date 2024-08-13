@@ -169,7 +169,6 @@ body.nav-open {
     height: 100%;
     object-fit: cover;
     padding: 0;
-    cursor: zoom-in;
     opacity: 1;
     transition: opacity 0.5s ease;
 }
@@ -196,6 +195,7 @@ body.nav-open {
     display: flex;
     flex-direction: column;
     max-height: 100%;
+    flex-grow: 1;
 }
 
 .navigation-panel-background {
@@ -217,12 +217,16 @@ body.nav-open {
     bottom: 0;
     left: 0;
     right: 0;
-    width: 100%;
+    width: 90%;
     background-color: var(--navigation-panel-background-color);
+    border-right: 2px solid #06080ef5;
+    box-shadow: 0px 0px 2rem 1.2em #000000F0;
     color: white;
     padding: 1.5rem;
     transition: left 0.3s ease, box-shadow 0.3s ease;
     z-index: 81;
+    display: flex;
+    flex-direction: column;
 }
 
 .navigation-panel-container.invisible .navigation-panel {
@@ -232,15 +236,17 @@ body.nav-open {
 .navigation-panel-close {
     position: absolute;
     top: 1.5rem;
-    right: 1.5rem;
+    right: -1rem;
     width: 2rem;
     height: 2rem;
     border-radius: 1rem;
-    font-size: 150%;
+    font-size: 120%;
     color: #A0A0A0;
     cursor: pointer;
     text-align: center;
     background-color: var(--navigation-panel-background-color);
+    border: 2px solid #06080ef5;
+    box-shadow: 0px 0px 0.7rem 0.05rem #000000A0;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -248,6 +254,30 @@ body.nav-open {
 }
 
 .navigation-panel-close:hover {
+    color: var(--navigation-panel-highlight-color);
+    background-color: #000000FF;
+}
+
+.navigation-panel-close i {
+    top: -0.01rem;
+    position: relative;
+    left: -0.05rem;
+}
+
+.navigation-panel-close-bottom {
+    padding: 0.5em;
+    text-align: center;
+    font-style: italic;
+    font-weight: bold;
+    color: #A0A0A0;
+    cursor: pointer;
+    border: 1px solid #06080ef5;
+    background-color: var(--navigation-panel-background-color);
+    transition: color 0.2s ease, background-color 0.2s ease;
+    border-radius: 3rem;
+}
+
+.navigation-panel-close-bottom:hover {
     color: var(--navigation-panel-highlight-color);
     background-color: #000000FF;
 }
@@ -330,7 +360,7 @@ body.nav-open {
 }
 
 .navigation-panel-collections-title {
-    margin-top: 2rem;
+    margin-top: 1rem;
     margin-left: 1rem;
     color: #B0B0B0A0;
     font-weight: bold;
@@ -563,7 +593,6 @@ body.nav-open {
     left: 0;
     background-color: #202020FC;
     display: none;
-    cursor: zoom-out;
     opacity: 1;
     z-index: 100;
     overflow: hidden;
@@ -639,15 +668,17 @@ body.nav-open {
 .loupe-photo-index,
 .grid-button,
 .loupe-button {
-    height: 2rem;
+    height: 2.4rem;
+    min-width: 2.4rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: #101010F0;
-    border-radius: 1rem;
+    background-color: #151724;
+    border-radius: 1.2rem;
     color: #A0A0A0;
-    opacity: 0.5;
+    opacity: 0.7;
     transition: opacity 0.3s ease, color 0.3s ease;
+    box-shadow: 0 0 0.3em 0.1em #06070aa0;
 }
 
 .grid-action-zoom-in,
@@ -826,8 +857,7 @@ body.nav-open {
     .navigation-panel {
         right: auto;
         width: 30rem;
-        max-width: 100%;
-        box-shadow: 0px 0px 30px #000000;
+        max-width: 90%;
     }
 
     .navigation-panel-container.invisible .navigation-panel {
@@ -835,9 +865,8 @@ body.nav-open {
         box-shadow: none;
     }
 
-    .navigation-panel-close {
-        top: 1.5rem;
-        right: -1rem;
+    .navigation-panel-close-bottom {
+        display: none;
     }
 
     .navigation-panel-pin {
@@ -852,6 +881,14 @@ body.nav-open {
 
     .navigation-panel-pin .fa-rotate-by {
         --fa-rotate-angle: 45deg;
+    }
+
+    .grid-item .photo {
+        cursor: zoom-in;
+    }
+
+    .loupe {
+        cursor: zoom-out;
     }
 
     .loupe-prev, .loupe-next {
@@ -901,4 +938,27 @@ body.nav-open {
         max-width: unset !important;
     }
 
+}
+
+@media (max-height: 800px) {
+    .navigation-panel {
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+    }
+
+    .navigation-panel-title {
+        margin-bottom: 0.6rem;
+    }
+
+    .navigation-panel-current-path {
+        margin-bottom: 0rem;
+    }
+
+    .navigation-panel-n-photos {
+        display: none;
+    }
+
+    .navigation-panel-collections-title {
+        margin-top: 0.5rem;
+    }
 }
