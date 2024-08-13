@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::{config::Config, photos::Photo, uid::UID, Error};
-use rocket::{fairing, tokio::fs, Build, Rocket};
+use rocket::{fairing, Build, Rocket};
 use rocket_db_pools::{
     sqlx::{
         self,
@@ -12,12 +12,39 @@ use rocket_db_pools::{
     Database,
 };
 
+const SCHEMA: &str = "
+DROP TABLE IF EXISTS photo;
+
+CREATE TABLE photo (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename VARCHAR(255),
+    path VARCHAR(255),
+    uid VARCHAR(16),
+    md5 VARCHAR(32),
+    sort_order INTEGER DEFAULT 0,
+    hidden INTEGER DEFAULT 0,
+    metadata_parsed INTEGER DEFAULT 0,
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0,
+    color VARCHAR(16) NOT NULL DEFAULT '',
+    title VARCHAR(255) NOT NULL DEFAULT '',
+    place VARCHAR(255) NOT NULL DEFAULT '',
+    date_taken VARCHAR(16) NOT NULL DEFAULT '',
+    camera_model VARCHAR(255) NOT NULL DEFAULT '',
+    lens_model VARCHAR(255) NOT NULL DEFAULT '',
+    focal_length VARCHAR(16) NOT NULL DEFAULT '',
+    aperture VARCHAR(16) NOT NULL DEFAULT '',
+    exposure_time VARCHAR(16) NOT NULL DEFAULT '',
+    sensitivity VARCHAR(16) NOT NULL DEFAULT ''
+);
+";
+
 #[derive(Database)]
 #[database("niobium")]
 pub struct DB(pub sqlx::SqlitePool);
 
 /// Fairing callback that checks if the database has already been filled with the `photo`
-/// table and if not, executes `schema.sql` to initialize it
+/// table and if not, initialize it
 pub async fn init_schema(rocket: Rocket<Build>) -> fairing::Result {
     // Make sure the database has been initialized (fairings have been attached in the correct order)
     if let Some(db) = DB::fetch(&rocket) {
@@ -36,33 +63,23 @@ pub async fn init_schema(rocket: Rocket<Build>) -> fairing::Result {
             Ok(None) => {
                 print!("Database is empty, creating schema... ");
 
-                // Try to open `schema.sql`
-                match fs::read_to_string("schema.sql").await {
-                    Ok(schema) => {
-                        // Split the schema to import into individual queries
-                        let sql_queries = schema
-                            .split(';')
-                            .map(|s| s.trim())
-                            .filter(|s| !s.is_empty());
-                        for sql_query in sql_queries {
-                            let query_result = sqlx::query(sql_query).execute(db).await;
-                            if let Err(error) = query_result {
-                                println!();
-                                eprintln!("Error, unable to execute a query from schema.sql :");
-                                eprintln!("{sql_query}");
-                                eprintln!("Result : {error}");
-                                return Err(rocket);
-                            }
-                        }
-                        println!("success");
-                        Ok(rocket)
-                    }
-                    Err(error) => {
+                // Split the schema to import into individual queries
+                let sql_queries = SCHEMA
+                    .split(';')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty());
+                for sql_query in sql_queries {
+                    let query_result = sqlx::query(sql_query).execute(db).await;
+                    if let Err(error) = query_result {
                         println!();
-                        eprintln!("Error, unable to open \"schema.sql\" : {error}");
-                        Err(rocket)
+                        eprintln!("Error, unable to execute a query from schema.sql :");
+                        eprintln!("{sql_query}");
+                        eprintln!("Result : {error}");
+                        return Err(rocket);
                     }
                 }
+                println!("success");
+                Ok(rocket)
             }
 
             // Something went wrong when checking `sqlite_master`, we'll have to scrub the launch
