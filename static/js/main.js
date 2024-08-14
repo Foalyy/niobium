@@ -897,10 +897,12 @@ function showLoupeUI() {
         clearTimeout(hideLoupeUiTimeout);
         hideLoupeUiTimeout = undefined;
     }
-    hideLoupeUiTimeout = setTimeout(() => {
-        hideLoupeUiTimeout = undefined;
-        hideLoupeUI();
-    }, 5000);
+    if (!isTouchscreen()) {
+        hideLoupeUiTimeout = setTimeout(() => {
+            hideLoupeUiTimeout = undefined;
+            hideLoupeUI();
+        }, 5000);
+    }
 }
 
 function hideLoupeUI() {
@@ -1017,6 +1019,9 @@ $(function() {
         event.stopPropagation();
     });
     $('.loupe').on('mousemove', function(event) {
+        showLoupeUI();
+    });
+    $('.loupe').on('touchstart', function(event) {
         showLoupeUI();
     });
     $('.loupe-prev').on('click', function(event) {
