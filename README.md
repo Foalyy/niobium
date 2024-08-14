@@ -58,7 +58,7 @@ $ docker run -v /srv/niobium/photos:/app/photos:ro -v /srv/niobium/data:/app/dat
 
 This will expose Niobium on the port 8000.
 
-The Docker image has a startup script which copies the default config file into the `data` directory the first time the container is launched, and overrides the default value of some environment variables to point to this directory (see `docker_entrypoint.sh` for more information). In order to customize the configuration, launch the app a first time, then edit the newly-created `niobium.config` inside the `data` directory, and finally restart the app to reload the config. There is also a `niobium_collections.config.sample` that can be customized and renamed to `niobium_collections.config` in order to create collections (see [Collections](#framed_picture-4-collections) below).
+The Docker image has a startup script which copies the default config file into the `data` directory the first time the container is launched, and overrides the default value of some environment variables to point to this directory (see `docker-entrypoint.sh` for more information). In order to customize the configuration, launch the app a first time, then edit the newly-created `niobium.config` inside the `data` directory, and finally restart the app to reload the config. There is also a `niobium_collections.config.sample` that can be customized and renamed to `niobium_collections.config` in order to create collections (see [Collections](#framed_picture-4-collections) below).
 
 If you prefer to use `docker-compose`, here is a sample script :
 

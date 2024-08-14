@@ -17,10 +17,10 @@ COPY static ./static
 COPY templates ./templates
 COPY niobium.config.sample ./
 COPY niobium_collections.config.sample ./
-COPY --chmod=0755 docker_entrypoint.sh /
+COPY --chmod=0755 docker-entrypoint.sh /
 
 EXPOSE 8000
 
-ENTRYPOINT ["/docker_entrypoint.sh"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
 
 CMD ["./niobium"]
