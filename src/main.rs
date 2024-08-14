@@ -30,6 +30,8 @@ use uid::UID;
 
 #[launch]
 async fn rocket() -> _ {
+    let niobium_version = env!("CARGO_PKG_VERSION");
+
     // Try to read the config file
     let config_file_var_name = "NIOBIUM_CONFIG_FILE";
     let config_file_str = match std::env::var(config_file_var_name) {
@@ -94,7 +96,7 @@ async fn rocket() -> _ {
         .attach(AdHoc::try_on_ignite("Photos init", photos::init))
         .attach(AdHoc::on_liftoff("Startup message", move |_| {
             Box::pin(async move {
-                println!("## Niobium started on {address}:{port}");
+                println!("## Niobium v{niobium_version} started on {address}:{port}");
             })
         }))
 }
