@@ -82,13 +82,13 @@ services:
 
 ### :package: 1.1/ *(Option B)* Install using a release
 
-Example of how to install Niobium on Debian 11 in `/var/www/my_photos`, customize the paths as needed.
+Example of how to install Niobium on Debian 12 in `/var/www/my_photos`, customize the paths as needed. See the latest release on GitHub : https://github.com/Foalyy/niobium/releases
 
 ```
 # cd /var/www/
-# wget https://github.com/Foalyy/niobium/releases/download/v0.2.0/niobium_0.2.0.zip
-# unzip niobium_0.2.0.zip
-# mv niobium_0.2.0 my_photos
+# wget https://github.com/Foalyy/niobium/releases/download/v0.4.1/niobium_0.4.1.zip
+# unzip niobium_0.4.1.zip
+# mv niobium_0.4.1 my_photos
 # cd my_photos
 ```
 
