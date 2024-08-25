@@ -12,7 +12,7 @@
 
 ![Screenshot](https://user-images.githubusercontent.com/2955191/207928165-247f39c1-826a-481d-a7c0-08a3a804d301.jpg)
 
-### <div align="center">[:fire: Demo](https://photos.silica.io/)</div>
+### <div align="center">[:fire: Demo](https://demo.niobium.silica.io/)</div>
 
 **Niobium** is an open-source, self-hosted photo gallery viewer that features :
 - a clean, full-screen, responsive grid with subtle animations to showcase your best images
@@ -23,16 +23,21 @@
 - an optional navigation panel to explore sub-directories
 - custom _collections_, to create independant galleries each with a customizable URL pointing to a curated selections of photos
 - fine-grained password protection and control over the indexing of each directory and collection
+- easy self-host on a server or NAS
 
 *Interested in a hosted version for you or your clients? Contact me at the address displayed on [my profile](https://github.com/Foalyy).*
 
 - [1/ Installation](#hammer_and_wrench-1-installation)
-  - [1.1/ (Option A) Install with Docker](#ship-11-option-a-install-with-docker)
-  - [1.1/ (Option B) Install using a release](#package-11-option-b-install-using-a-release)
-  - [1.1/ (Option C) Build from source](#wrench-11-option-c-build-from-source)
-  - [1.2/ Start as a daemon](#ghost-12-start-as-a-daemon)
-  - [1.3/ Set up the reverse proxy](#shield-13-set-up-the-reverse-proxy)
-  - [1.4/ Updating](#arrow_down-14-updating)
+  - [1.1/ Linux](#computer-11-linux)
+    - [1.1.1/ (Option A) Install with Docker](#ship-111-option-a-install-with-docker)
+    - [1.1.1/ (Option B) Install using a release](#package-111-option-b-install-using-a-release)
+    - [1.1.1/ (Option C) Build from source](#wrench-111-option-c-build-from-source)
+    - [1.1.2/ Start as a daemon](#ghost-112-start-as-a-daemon)
+    - [1.1.3/ Set up the reverse proxy](#shield-113-set-up-the-reverse-proxy)
+    - [1.1.4/ Updating](#arrow_down-114-updating)
+  - [1.2/ Raspberry Pi](#strawberry-12-raspberry-pi)
+  - [1.3/ NAS (Synology, ...)](#file_cabinet-13-nas-synology)
+  - [1.4/ Windows](#desktop_computer-14-windows)
 - [2/ Configuration](#gear-2-configuration)
   - [2.1/ Environment variables](#globe_with_meridians-21-environment-variables)
   - [2.2/ Main config file](#spiral_notepad-22-main-config-file)
@@ -43,7 +48,9 @@
 
 ## :hammer_and_wrench: 1/ Installation
 
-### :ship: 1.1/ *(Option A)* Install with Docker
+## :computer: 1.1/ Linux
+
+### :ship: 1.1.1/ *(Option A)* Install with Docker
 
 If you have Docker installed, this is the easiest solution. You will need 2 directories : 
 
@@ -56,7 +63,7 @@ Then simply download and run Niobium using :
 $ docker run -v /srv/niobium/photos:/app/photos:ro -v /srv/niobium/data:/app/data -p 8000:8000 niobium
 ```
 
-This will expose Niobium on the port 8000.
+This will expose Niobium on port 8000.
 
 The Docker image has a startup script which copies the default config file into the `data` directory the first time the container is launched, and overrides the default value of some environment variables to point to this directory (see `docker-entrypoint.sh` for more information). In order to customize the configuration, launch the app a first time, then edit the newly-created `niobium.config` inside the `data` directory, and finally restart the app to reload the config. There is also a `niobium_collections.config.sample` that can be customized and renamed to `niobium_collections.config` in order to create collections (see [Collections](#framed_picture-4-collections) below).
 
@@ -80,7 +87,7 @@ services:
 ```
 
 
-### :package: 1.1/ *(Option B)* Install using a release
+### :package: 1.1.1/ *(Option B)* Install using a release
 
 Example of how to install Niobium on Debian 12 in `/var/www/my_photos`, customize the paths as needed. See the latest release on GitHub : https://github.com/Foalyy/niobium/releases
 
@@ -119,9 +126,9 @@ Start Niobium to make sure everything works fine. Note that photos indexing (and
 # ./niobium
 ```
 
-Niobium is now running, but for a more permanent installation, keep reading [section 1.2](#12-start-as-a-daemon).
+Niobium is now running, but for a more permanent installation, keep reading [section 1.1.2](#ghost-112-start-as-a-daemon).
 
-### :wrench: 1.1/ *(Option C)* Build from source
+### :wrench: 1.1.1/ *(Option C)* Build from source
 
 Niobium is built with Rust, you will need a Rust compiler to compile it. Here is the simplest way to install one, following [official instructions](https://www.rust-lang.org/tools/install), which will install Cargo (an all-in-one tool to easily compile and run Rust programs) and an up-to-date Rust compiler :
 
@@ -154,7 +161,7 @@ Create a symlink to the binary into the main directory :
 ```
 
 
-### :ghost: 1.2/ Start as a daemon
+### :ghost: 1.1.2/ Start as a daemon
 
 A sample `systemd` service file is provided in `utils/niobium.service`. You can customize it as necessary, and then install it :
 
@@ -175,7 +182,7 @@ If you didn't start the app directly with `./niobium`, you can track the progres
 If your OS is not `systemd`-based or your religion forbids you from using `systemd`, adapt the daemon config file accordingly.
 
 
-### :shield: 1.3/ Set up the reverse proxy
+### :shield: 1.1.3/ Set up the reverse proxy
 
 Niobium can serve your files directly, but it is recommended to set it up behind a reverse proxy that will handle HTTPS.
 
@@ -227,7 +234,7 @@ Enable and start the virtualhost :
 ```
 
 
-### :arrow_down: 1.4/ Updating
+### :arrow_down: 1.1.4/ Updating
 
 Updating Niobium to the latest version is easy : 
 - stop the service if it is running
@@ -238,6 +245,50 @@ Updating Niobium to the latest version is easy :
   - update : `git pull`
   - rebuild : `cargo build --release`
 - restart the service
+
+
+## :strawberry: 1.2/ Raspberry Pi
+
+If you would like to self-host your photos on your own Internet connection, a Raspberry Pi is a great and cost-effective solution. If you have a commercial NAS, [look below](#file_cabinet-13-nas-synology) instead.
+
+To run Niobium on a Raspberry Pi, [install the latest Raspberry Pi OS](https://www.raspberrypi.com/documentation/computers/getting-started.html#install-an-operating-system), then either :
+
+- [install Docker](https://docs.docker.com/engine/install/debian/), pull [foalyy/niobium](https://hub.docker.com/r/foalyy/niobium), then follow the [instructions for Linux above](#ship-111-option-a-install-with-docker)
+- or [install using a release](#package-111-option-b-install-using-a-release)
+
+If you want to allow external access, remember to open and redirect the port on your router.
+
+
+## :file_cabinet: 1.3/ NAS (Synology, ...)
+
+Some modern NAS operating systems, such as DSM from Synology, are able to run apps packaged with Docker. This makes it very handy to self-host your gallery right where your photos are.
+
+Here are the instructions for Synology, but installation for other NAS manufacturers should be very similar :
+
+- go to the Package Center, look for the Docker app, and make sure that it is installed and running
+- open Docker in the apps menu
+- in the Registry menu, look for `foalyy/niobium` and download it
+- in the Image menu, select `foalyy/niobium:latest` and click Launch (or simply double-click on the image)
+- in the configuration assistant, here are a few settings to customize :
+  - check `Enable auto-restart`
+  - if you are using Web Station, you may want to enable the Web Portal
+  - in the Port Settings page, map a local port to the port 8000 inside the container (usually, the local port will also be 8000)
+  - in the Volume Settings page, add two folders :
+    - point to the folder that contains your photos on your NAS, and mount it in the path `/app/photos` (you can check _Read only_ for this folder)
+    - create a new folder on your NAS somewhere that will be used to store the apps database and config files (for instance in the `docker` shared folder), and mount it on `/app/data` (do *not* check "Read only" for this folder)
+  - check "Run this container after the wizard is finished"
+- the running container should appear in the Image menu, you can open it to check the config and read the logs (notably, the progress of the photos indexing)
+- finally, point your browser to the IP address of your NAS with the chosen port, the gallery should appear
+
+If you want to allow external access, remember to open and redirect the port on your router.
+
+
+## :desktop_computer: 1.4/ Windows
+
+Niobium currently doesn't provide compiled packages for Windows. If you would like to host a photo gallery on a Windows machine, either :
+
+- install Docker Desktop and follow similar instructions as for a [NAS](#file_cabinet-13-nas-synology)
+- or install Rust and and adapt the [instructions above](#wrench-111-option-c-build-from-source) to build from source
 
 
 ## :gear: 2/ Configuration
