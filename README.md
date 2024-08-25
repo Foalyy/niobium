@@ -36,7 +36,7 @@
     - [1.1.3/ Set up the reverse proxy](#shield-113-set-up-the-reverse-proxy)
     - [1.1.4/ Updating](#arrow_down-114-updating)
   - [1.2/ Raspberry Pi](#strawberry-12-raspberry-pi)
-  - [1.3/ NAS (Synology, ...)](#file_cabinet-13-nas-synology)
+  - [1.3/ NAS (Synology, ...)](#file_cabinet-13-nas-synology-)
   - [1.4/ Windows](#desktop_computer-14-windows)
 - [2/ Configuration](#gear-2-configuration)
   - [2.1/ Environment variables](#globe_with_meridians-21-environment-variables)
@@ -249,7 +249,7 @@ Updating Niobium to the latest version is easy :
 
 ## :strawberry: 1.2/ Raspberry Pi
 
-If you would like to self-host your photos on your own Internet connection, a Raspberry Pi is a great and cost-effective solution. If you have a commercial NAS, [look below](#file_cabinet-13-nas-synology) instead.
+If you would like to self-host your photos on your own Internet connection, a Raspberry Pi is a great and cost-effective solution. If you have a commercial NAS, [look below](#file_cabinet-13-nas-synology-) instead.
 
 To run Niobium on a Raspberry Pi, [install the latest Raspberry Pi OS](https://www.raspberrypi.com/documentation/computers/getting-started.html#install-an-operating-system), then either :
 
@@ -287,7 +287,7 @@ If you want to allow external access, remember to open and redirect the port on 
 
 Niobium currently doesn't provide compiled packages for Windows. If you would like to host a photo gallery on a Windows machine, either :
 
-- install Docker Desktop and follow similar instructions as for a [NAS](#file_cabinet-13-nas-synology)
+- install Docker Desktop and follow similar instructions as for a [NAS](#file_cabinet-13-nas-synology-)
 - or install Rust and and adapt the [instructions above](#wrench-111-option-c-build-from-source) to build from source
 
 
