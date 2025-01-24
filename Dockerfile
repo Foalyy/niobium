@@ -1,5 +1,4 @@
 FROM docker.io/rust:1-slim-bookworm AS build
-
 ARG pkg=niobium
 WORKDIR /build
 COPY . .
@@ -11,6 +10,7 @@ RUN --mount=type=cache,target=/build/target \
     objcopy --compress-debug-sections target/release/$pkg ./niobium
 
 FROM docker.io/debian:bookworm-slim
+RUN apt-get update && apt-get install -y curl
 WORKDIR /app
 COPY --from=build /build/niobium ./
 COPY static ./static
