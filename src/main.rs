@@ -20,6 +20,7 @@ use rocket::fairing::AdHoc;
 use rocket::fs::NamedFile;
 use rocket::http::{CookieJar, Header};
 use rocket::response::Redirect;
+use rocket::shield::{Frame, Shield};
 use rocket::{fs::FileServer, State};
 use rocket_db_pools::{sqlx, Connection, Database};
 use rocket_dyn_templates::{context, Template};
@@ -68,6 +69,9 @@ async fn rocket() -> _ {
         .merge(("port", config.PORT))
         .merge(("databases.niobium.url", &config.DATABASE_PATH));
 
+    // Configure the content protection headers
+    let shield = Shield::default().disable::<Frame>();
+
     // Let's go to spaaace !
     rocket::custom(figment)
         .mount(
@@ -85,6 +89,7 @@ async fn rocket() -> _ {
             ],
         )
         .mount("/static", FileServer::from("static/").rank(0))
+        .attach(shield)
         .attach(Template::fairing())
         .attach(DB::init())
         .attach(AdHoc::try_on_ignite(
