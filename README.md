@@ -93,9 +93,9 @@ Example of how to install Niobium on Debian 12 in `/var/www/my_photos`, customiz
 
 ```
 # cd /var/www/
-# wget https://github.com/Foalyy/niobium/releases/download/v0.4.1/niobium_0.4.1.zip
-# unzip niobium_0.4.1.zip
-# mv niobium_0.4.1 my_photos
+# wget https://github.com/Foalyy/niobium/releases/download/v0.4.2/niobium_0.4.2.zip
+# unzip niobium_0.4.2.zip
+# mv niobium_0.4.2 my_photos
 # cd my_photos
 ```
 

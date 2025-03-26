@@ -7,6 +7,12 @@
         :root {
             --row-height: {{ config.DEFAULT_ROW_HEIGHT }}vh;
         }
+
+        @media screen and (orientation:portrait) {
+            :root {
+                --row-height: {{ config.DEFAULT_ROW_HEIGHT_VERTICAL }}vh !important;
+            }
+        }
     </style>
 {% endblock %}
 

@@ -145,6 +145,12 @@ pub struct Config {
     #[serde(default = "config_default_row_height")]
     pub DEFAULT_ROW_HEIGHT: usize,
 
+    /// Height of a single row displayed in grid view, as a percent of the browser's viewport
+    /// height, for vertical screens. For example, `20` will show up to 5 rows at a time.
+    /// Default : 9 (show 10 rows with a hint of more at the bottom)
+    #[serde(default = "config_default_row_height_vertical")]
+    pub DEFAULT_ROW_HEIGHT_VERTICAL: usize,
+
     /// Percentage by which the grid's row height is modified every time the user presses the
     /// Zoom+ / Zoom- buttons.
     /// Default : 10
@@ -456,6 +462,10 @@ fn config_default_sort_order() -> String {
 
 fn config_default_row_height() -> usize {
     23 // vh
+}
+
+fn config_default_row_height_vertical() -> usize {
+    9 // vh
 }
 
 fn config_default_max_zoom() -> usize {

@@ -120,6 +120,11 @@ REVERSE_SORT_ORDER = false
 # Default : 23 (show 4 rows with a hint of more at the bottom)
 DEFAULT_ROW_HEIGHT = 23 # vh
 
+# Height of a single row displayed in grid view, as a percent of the browser's viewport
+# height, for vertical screens. For example, `20` will show up to 5 rows at a time.
+# Default : 9 (show 10 rows with a hint of more at the bottom)
+DEFAULT_ROW_HEIGHT_VERTICAL = 9
+
 # Percentage by which the grid's row height is modified every time the user presses the
 # Zoom+ / Zoom- buttons.
 # Default : 10

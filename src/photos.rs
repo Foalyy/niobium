@@ -1492,7 +1492,7 @@ enum PhotosGuard<'a> {
     CollectionGuard(RwLockReadGuard<'a, Collections>, String),
 }
 
-impl<'a> PhotosGuard<'a> {
+impl PhotosGuard<'_> {
     fn get(&self, path: &str) -> Option<&Vec<CachedPhoto>> {
         match self {
             PhotosGuard::GalleryGuard(guard) => guard.get(path),

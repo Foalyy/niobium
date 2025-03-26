@@ -133,7 +133,7 @@ body.nav-open {
 
 .grid-content {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     flex-wrap: wrap;
     justify-content: center;
     align-content: center;
@@ -154,7 +154,8 @@ body.nav-open {
 
 .grid-item {
     max-width: 100%;
-    width: 100%;
+    width: auto;
+    height: var(--row-height);
     min-width: 30px;
     flex-grow: 1;
     position: relative;
@@ -166,7 +167,7 @@ body.nav-open {
     top: 0px;
     left: 0px;
     width: 100%;
-    height: 100%;
+    height: calc(var(--row-height) - 2 * var(--padding));
     object-fit: cover;
     padding: 0;
     opacity: 1;
@@ -683,7 +684,14 @@ body.nav-open {
 
 .grid-action-zoom-in,
 .grid-action-zoom-out {
-    display: none;
+    display: flex;
+}
+
+@media screen and (orientation:portrait) {
+    .grid-action-zoom-in,
+    .grid-action-zoom-out {
+        display: none;
+    }
 }
 
 .grid-button:hover,
@@ -851,19 +859,6 @@ body.nav-open {
 }
 
 @media (min-width: 576px) {
-    .grid-content {
-        flex-direction: row;
-    }
-
-    .grid-item {
-        width: auto;
-        height: var(--row-height);
-    }
-
-    .grid-item .photo {
-        height: calc(var(--row-height) - 2 * var(--padding));
-    }
-
     .grid-item.selected .photo {
         padding: 0;
         transition: top, left, width, height, box-shadow;
@@ -876,11 +871,6 @@ body.nav-open {
         box-shadow: 0px 0px 4vh #000000FF;
         border: calc(2 * var(--padding)) solid var(--background-color);
         z-index: 10;
-    }
-
-    .grid-action-zoom-in,
-    .grid-action-zoom-out {
-        display: flex;
     }
 
     .navigation-panel {
@@ -959,14 +949,6 @@ body.nav-open {
     .nav-pin .navigation-panel-pin .fa-rotate-by {
         --fa-rotate-angle: 0deg;
     }
-}
-
-@media (max-width: 576px) {
-
-    .grid-item {
-        max-width: unset !important;
-    }
-
 }
 
 @media (max-height: 800px) {
