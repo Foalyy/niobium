@@ -60,7 +60,7 @@ If you have Docker installed, this is the easiest solution. You will need 2 dire
 Then simply download and run Niobium using :
 
 ```
-$ docker run -v /srv/niobium/photos:/app/photos:ro -v /srv/niobium/data:/app/data -p 8000:8000 niobium
+$ docker run -v /srv/niobium/photos:/app/photos:ro -v /srv/niobium/data:/app/data -p 8000:8000 foalyy/niobium
 ```
 
 This will expose Niobium on port 8000.
@@ -74,7 +74,7 @@ version: "3"
 
 services:
   niobium:
-    image: niobium
+    image: foalyy/niobium
     container_name: niobium
     restart: always
     ports:
